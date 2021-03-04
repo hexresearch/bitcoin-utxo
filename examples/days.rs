@@ -2,16 +2,19 @@
 extern crate bitcoin_utxo;
 extern crate bitcoin;
 
-use std::net::{IpAddr, Ipv4Addr, Shutdown, SocketAddr, TcpStream};
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, process};
 use std::io::Write;
+use std::net::{IpAddr, Ipv4Addr, Shutdown, SocketAddr, TcpStream};
+use std::str::FromStr;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use bitcoin::consensus::encode;
-use bitcoin::network::{address, constants, message, message_network};
+use bitcoin::blockdata;
+use bitcoin::network::{address, constants, message, message_network, message_blockdata};
 use bitcoin::network::stream_reader::StreamReader;
 use bitcoin::secp256k1;
 use bitcoin::secp256k1::rand::Rng;
+use bitcoin::BlockHash;
 
 fn main() {
     // This example establishes a connection to a Bitcoin node, sends the intial
@@ -61,11 +64,22 @@ fn main() {
                 }
                 message::NetworkMessage::Verack => {
                     println!("Received verack message: {:?}", reply.payload);
-                    break;
+
+                    let genesis_hash = blockdata::constants::genesis_block(constants::Network::Bitcoin).block_hash();
+                    let locator_hashes = vec![genesis_hash];
+                    let stop_hash = BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap();
+                    let blocks_request = message_blockdata::GetBlocksMessage::new(locator_hashes, stop_hash);
+                    let test_message = message::RawNetworkMessage {
+                        magic: constants::Network::Bitcoin.magic(),
+                        payload: message::NetworkMessage::GetBlocks(blocks_request),
+                    };
+                    let _ = stream.write_all(encode::serialize(&test_message).as_slice());
+                    println!("Sent request for blocks after genesis");
+                    // break;
                 }
                 _ => {
                     println!("Received unknown message: {:?}", reply.payload);
-                    break;
+                    // break;
                 }
             }
         }
