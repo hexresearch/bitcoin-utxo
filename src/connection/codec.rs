@@ -3,7 +3,7 @@ use tokio_util::codec::Encoder;
 
 use bitcoin::consensus::encode;
 use bitcoin::network::constants::Network;
-use bitcoin::network::message::{RawNetworkMessage, NetworkMessage};
+use bitcoin::network::message::{NetworkMessage, RawNetworkMessage};
 use bytes::{BufMut, BytesMut};
 use std::io;
 
@@ -14,7 +14,9 @@ pub struct MessageCodec {
 
 impl Default for MessageCodec {
     fn default() -> MessageCodec {
-        MessageCodec { network: Network::Bitcoin }
+        MessageCodec {
+            network: Network::Bitcoin,
+        }
     }
 }
 
@@ -32,14 +34,14 @@ impl Decoder for MessageCodec {
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<NetworkMessage>, encode::Error> {
         if !buf.is_empty() {
             match encode::deserialize_partial::<RawNetworkMessage>(buf) {
-                Err(encode::Error::Io(ref err)) if err.kind () == io::ErrorKind::UnexpectedEof => {
+                Err(encode::Error::Io(ref err)) if err.kind() == io::ErrorKind::UnexpectedEof => {
                     Ok(None)
                 }
                 Err(err) => return Err(err),
                 Ok((message, index)) => {
                     let _ = buf.split_to(index);
                     Ok(Some(message.payload))
-                },
+                }
             }
         } else {
             Ok(None)
