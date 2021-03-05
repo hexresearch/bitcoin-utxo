@@ -16,6 +16,8 @@ use bitcoin::secp256k1;
 use bitcoin::secp256k1::rand::Rng;
 use bitcoin::BlockHash;
 
+use bitcoin_utxo::connection;
+
 fn main() {
     // This example establishes a connection to a Bitcoin node, sends the intial
     // "version" message, waits for the reply, and finally closes the connection.
