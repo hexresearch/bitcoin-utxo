@@ -2,20 +2,21 @@
 extern crate bitcoin;
 extern crate bitcoin_utxo;
 
+use futures::pin_mut;
 use futures::sink;
-use futures::stream;
-use futures::SinkExt;
-use std::error::Error;
-use std::io;
-use std::net::SocketAddr;
 use std::{env, process};
+use std::error::Error;
+use std::net::SocketAddr;
+use std::str::FromStr;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio::sync::mpsc;
 
-// use bitcoin::blockdata;
+use bitcoin::blockdata;
+use bitcoin::BlockHash;
 use bitcoin::consensus::encode;
-// use bitcoin::secp256k1;
-// use bitcoin::secp256k1::rand::Rng;
-// use bitcoin::BlockHash;
 use bitcoin::network::constants;
+use bitcoin::network::message_blockdata;
+use bitcoin::network::message;
 
 use bitcoin_utxo::connection::connect;
 
@@ -36,31 +37,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
         process::exit(1);
     });
 
-    // let genesis_hash = blockdata::constants::genesis_block(constants::Network::Bitcoin).block_hash();
-    // let locator_hashes = vec![genesis_hash];
-    // let stop_hash = BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap();
-    // let blocks_request = message_blockdata::GetBlocksMessage::new(locator_hashes, stop_hash);
-    // let test_message = message::RawNetworkMessage {
-    //     magic: constants::Network::Bitcoin.magic(),
-    //     payload: message::NetworkMessage::GetBlocks(blocks_request),
-    // };
-    // let _ = stream.write_all(encode::serialize(&test_message).as_slice());
-    // println!("Sent request for blocks after genesis");
-
-    let imsgs = stream::pending();
-    let outmsgs = sink::drain().sink_map_err(|_| {
-        encode::Error::Io(io::Error::new(
-            io::ErrorKind::Other,
-            "Impossible error in sink!",
-        ))
+    const BUFFER_SIZE: usize = 10;
+    let (msg_sender, msg_reciver) = mpsc::channel::<message::NetworkMessage>(BUFFER_SIZE);
+    let msg_sink = sink::unfold(msg_sender, |sender, msg: message::NetworkMessage| async move {
+        match msg {
+            message::NetworkMessage::Verack => {
+                let genesis_hash = blockdata::constants::genesis_block(constants::Network::Bitcoin).block_hash();
+                let locator_hashes = vec![genesis_hash];
+                let stop_hash = BlockHash::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap();
+                let blocks_request = message_blockdata::GetBlocksMessage::new(locator_hashes, stop_hash);
+                sender.send(message::NetworkMessage::GetBlocks(blocks_request)).await.unwrap();
+                println!("Sent request for blocks after genesis");
+                Ok::<_, encode::Error>(sender)
+            }
+            _ => {
+                println!("Got message {:?}", msg);
+                Ok::<_, encode::Error>(sender)
+            }
+        }
     });
+    pin_mut!(msg_sink);
+    let msg_stream = ReceiverStream::new(msg_reciver);
+
     connect(
         &address,
         constants::Network::Bitcoin,
         "rust-client".to_string(),
         0,
-        imsgs,
-        outmsgs,
+        msg_stream,
+        msg_sink,
     )
     .await?;
 
