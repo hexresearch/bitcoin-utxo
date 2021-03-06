@@ -1,4 +1,5 @@
 pub mod codec;
+pub mod message;
 
 use futures::pin_mut;
 use futures::sink;
@@ -24,6 +25,7 @@ use bitcoin::secp256k1;
 use bitcoin::secp256k1::rand::Rng;
 
 use crate::connection::codec::MessageCodec;
+use crate::connection::message::process_messages;
 
 pub async fn connect(
     addr: &SocketAddr,
@@ -37,25 +39,21 @@ pub async fn connect(
         stream::once(async { build_version_message(addr, user_agent, start_height) });
     pin_mut!(handshake_stream);
 
-    const BUFFER_SIZE: usize = 10;
-    let (verack_sender, verack_reciver) = mpsc::channel::<NetworkMessage>(BUFFER_SIZE);
-    let verack_sink = sink::unfold(verack_sender, |sender, msg: NetworkMessage| async move {
+    let (verack_stream, verack_sink) = process_messages(|sender, msg| async move {
         match msg {
             NetworkMessage::Version(_) => {
                 println!("Received version message: {:?}", msg);
                 println!("Sent verack message");
                 sender.send(NetworkMessage::Verack).await.unwrap();
-                Ok::<_, encode::Error>(sender)
             }
             NetworkMessage::Verack => {
                 println!("Received verack message: {:?}", msg);
-                Ok::<_, encode::Error>(sender)
             }
-            _ => Ok::<_, encode::Error>(sender),
-        }
+            _ => (),
+        };
+        sender
     });
     pin_mut!(verack_sink);
-    let verack_stream = ReceiverStream::new(verack_reciver);
 
     let internal_inmsgs = stream::select(stream::select(inmsgs, handshake_stream), verack_stream);
 

@@ -19,6 +19,7 @@ use bitcoin::network::message_blockdata;
 use bitcoin::network::message;
 
 use bitcoin_utxo::connection::connect;
+use bitcoin_utxo::connection::message::process_messages;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -37,9 +38,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         process::exit(1);
     });
 
-    const BUFFER_SIZE: usize = 10;
-    let (msg_sender, msg_reciver) = mpsc::channel::<message::NetworkMessage>(BUFFER_SIZE);
-    let msg_sink = sink::unfold(msg_sender, |sender, msg: message::NetworkMessage| async move {
+    let (msg_stream, msg_sink) = process_messages(|sender, msg| async move {
         match msg {
             message::NetworkMessage::Verack => {
                 let genesis_hash = blockdata::constants::genesis_block(constants::Network::Bitcoin).block_hash();
@@ -48,16 +47,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let blocks_request = message_blockdata::GetBlocksMessage::new(locator_hashes, stop_hash);
                 sender.send(message::NetworkMessage::GetBlocks(blocks_request)).await.unwrap();
                 println!("Sent request for blocks after genesis");
-                Ok::<_, encode::Error>(sender)
             }
             _ => {
                 println!("Got message {:?}", msg);
-                Ok::<_, encode::Error>(sender)
             }
         }
+        sender
     });
     pin_mut!(msg_sink);
-    let msg_stream = ReceiverStream::new(msg_reciver);
 
     connect(
         &address,
