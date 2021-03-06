@@ -23,6 +23,7 @@ use bitcoin::network::message_blockdata::Inventory;
 
 use bitcoin_utxo::connection::connect;
 use bitcoin_utxo::connection::message::process_messages;
+use bitcoin_utxo::storage::init_storage;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -40,6 +41,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         eprintln!("Error parsing address: {:?}", error);
         process::exit(1);
     });
+
+    let db = init_storage("./utxo_db")?;
 
     let (msg_stream, msg_sink) = process_messages(|sender, msg| async move {
         match msg {

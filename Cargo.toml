@@ -9,6 +9,7 @@ license = "MIT"
 
 [dependencies]
 bitcoin =  { version = "^0.26", features = [ "rand" ] }
+bitcoin_hashes = "^0.9"
 bytes = "1"
 futures = "0.3"
 tokio = { version = "1", features = ["full"] }
@@ -16,3 +17,5 @@ tokio-util = { version = "^0.6", features = [ "codec" ] }
 tokio-stream = "0.1"
 rocksdb = "0.15.0"
 byteorder = "1"
+chashmap = "^2.2"
+byte-strings = "^0.1"
