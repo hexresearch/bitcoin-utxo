@@ -14,3 +14,4 @@ futures = "0.3"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "^0.6", features = [ "codec" ] }
 tokio-stream = "0.1"
+rocksdb = "0.15.0"
