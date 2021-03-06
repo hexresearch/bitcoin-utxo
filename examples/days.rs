@@ -2,8 +2,10 @@
 extern crate bitcoin;
 extern crate bitcoin_utxo;
 
+use futures::future;
 use futures::pin_mut;
-use futures::sink;
+use futures::stream;
+use futures::StreamExt;
 use std::{env, process};
 use std::error::Error;
 use std::net::SocketAddr;
@@ -17,6 +19,7 @@ use bitcoin::consensus::encode;
 use bitcoin::network::constants;
 use bitcoin::network::message_blockdata;
 use bitcoin::network::message;
+use bitcoin::network::message_blockdata::Inventory;
 
 use bitcoin_utxo::connection::connect;
 use bitcoin_utxo::connection::message::process_messages;
@@ -47,6 +50,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let blocks_request = message_blockdata::GetBlocksMessage::new(locator_hashes, stop_hash);
                 sender.send(message::NetworkMessage::GetBlocks(blocks_request)).await.unwrap();
                 println!("Sent request for blocks after genesis");
+            }
+            message::NetworkMessage::Inv(invs) => {
+                let s = &sender;
+                stream::iter(invs).for_each_concurrent(1, |inv| async move {
+                    match inv {
+                        Inventory::Block(hash) => {
+                            s.send(message::NetworkMessage::GetData(vec![inv])).await.unwrap();
+                            println!("Sent request for block {:?}", hash);
+                        }
+                        _ => (),
+                    }
+                }).await;
             }
             _ => {
                 println!("Got message {:?}", msg);
