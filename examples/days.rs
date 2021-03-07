@@ -32,8 +32,6 @@ use bitcoin_utxo::storage::chain::{get_chain_height, get_block_locator, update_c
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // This example establishes a connection to a Bitcoin node, sends the intial
-    // "version" message, waits for the reply, and finally closes the connection.
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         eprintln!("not enough arguments");

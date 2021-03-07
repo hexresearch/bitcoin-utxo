@@ -1,16 +1,18 @@
 use futures::sink::{Sink, unfold};
-use futures::stream::{Stream};
-use futures::Future;
-use tokio_stream::wrappers::ReceiverStream;
-use tokio::sync::mpsc;
-use bitcoin::consensus::encode;
-use bitcoin::network::message;
-use bitcoin::network::message_blockdata;
-use bitcoin::network::message::NetworkMessage;
+use futures::stream;
+use futures::stream::{Stream, StreamExt};
 use bitcoin::BlockHash;
+use bitcoin::consensus::encode;
+use bitcoin::network::message_blockdata;
+use bitcoin::network::message_blockdata::Inventory;
+use bitcoin::network::message;
+use bitcoin::network::message::NetworkMessage;
+use futures::Future;
+use rocksdb::DB;
 use std::str::FromStr;
 use std::sync::Arc;
-use rocksdb::DB;
+use tokio_stream::wrappers::ReceiverStream;
+use tokio::sync::mpsc;
 
 use crate::connection::message::process_messages;
 use crate::storage::chain::{get_chain_height, get_block_locator, update_chain};
@@ -19,6 +21,7 @@ pub async fn sync_headers(db: Arc<DB>) -> (impl Stream<Item = NetworkMessage> + 
 {
     process_messages(move |sender, msg| {
         let db = db.clone();
+        let mut synced = false;
         async move {
             match msg {
                 message::NetworkMessage::Verack => {
@@ -29,9 +32,24 @@ pub async fn sync_headers(db: Arc<DB>) -> (impl Stream<Item = NetworkMessage> + 
                     update_chain(&db, &headers);
                     if headers.len() < 2000 {
                         println!("Synced all headers");
+                        synced = true;
                     } else {
                         ask_headers(&db, &sender).await;
                     }
+                },
+                message::NetworkMessage::Inv(invs) if synced => {
+                    let s = &sender;
+                    stream::iter(invs).for_each_concurrent(1, |inv| {
+                        let db = db.clone();
+                        async move {
+                            match inv {
+                                Inventory::Block(_) | Inventory::WitnessBlock(_) => {
+                                    ask_headers(&db, s).await;
+                                }
+                                _ => (),
+                            }
+                        }
+                    }).await;
                 }
                 _ => (),
             }
