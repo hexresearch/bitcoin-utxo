@@ -1,27 +1,27 @@
-use futures::sink::{Sink, unfold};
-use futures::stream;
-use futures::stream::{Stream, StreamExt};
 use bitcoin::BlockHash;
 use bitcoin::consensus::encode;
 use bitcoin::network::message_blockdata;
 use bitcoin::network::message_blockdata::Inventory;
 use bitcoin::network::message;
 use bitcoin::network::message::NetworkMessage;
-use futures::Future;
+use futures::sink::Sink;
+use futures::stream;
+use futures::stream::{Stream, StreamExt};
 use rocksdb::DB;
 use std::str::FromStr;
-use std::sync::Arc;
-use tokio_stream::wrappers::ReceiverStream;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 use crate::connection::message::process_messages;
 use crate::storage::chain::{get_chain_height, get_block_locator, update_chain};
 
+/// Request all headers from node and keep DB for main chain updated
 pub async fn sync_headers(db: Arc<DB>) -> (impl Stream<Item = NetworkMessage> + Unpin, impl Sink<NetworkMessage, Error = encode::Error>)
 {
+    let synced = Arc::new(Mutex::new(false));
     process_messages(move |sender, msg| {
         let db = db.clone();
-        let mut synced = false;
+        let synced = synced.clone();
         async move {
             match msg {
                 message::NetworkMessage::Verack => {
@@ -32,24 +32,28 @@ pub async fn sync_headers(db: Arc<DB>) -> (impl Stream<Item = NetworkMessage> + 
                     update_chain(&db, &headers);
                     if headers.len() < 2000 {
                         println!("Synced all headers");
-                        synced = true;
+                        let mut s = synced.lock().unwrap();
+                        *s = true;
                     } else {
                         ask_headers(&db, &sender).await;
                     }
                 },
-                message::NetworkMessage::Inv(invs) if synced => {
-                    let s = &sender;
-                    stream::iter(invs).for_each_concurrent(1, |inv| {
-                        let db = db.clone();
-                        async move {
-                            match inv {
-                                Inventory::Block(_) | Inventory::WitnessBlock(_) => {
-                                    ask_headers(&db, s).await;
+                message::NetworkMessage::Inv(invs) => {
+                    let s = synced.lock().unwrap();
+                    if *s {
+                        stream::iter(invs).for_each_concurrent(1, |inv| {
+                            let db = db.clone();
+                            let sender = sender.clone();
+                            async move {
+                                match inv {
+                                    Inventory::Block(_) | Inventory::WitnessBlock(_) => {
+                                        ask_headers(&db, &sender).await;
+                                    }
+                                    _ => (),
                                 }
-                                _ => (),
                             }
-                        }
-                    }).await;
+                        }).await;
+                    }
                 }
                 _ => (),
             }

@@ -3,7 +3,6 @@ use bitcoin::blockdata;
 use bitcoin::blockdata::block::BlockHeader;
 use bitcoin::hash_types::BlockHash;
 use bitcoin::network::constants;
-use byte_strings::concat_bytes;
 use byteorder::{ByteOrder, BigEndian};
 use rocksdb::{DB, WriteBatch, ColumnFamily};
 
@@ -14,7 +13,7 @@ pub fn init_chain_storage(db: &DB) {
     let mut batch = WriteBatch::default();
     let genesis_hash = blockdata::constants::genesis_block(constants::Network::Bitcoin).block_hash();
     add_block_to_chain(&mut batch, cf, &genesis_hash, 0);
-    db.write(batch);
+    db.write(batch).unwrap();
 }
 
 pub fn update_chain(db: &DB, headers: &Vec<BlockHeader>) {
@@ -29,7 +28,7 @@ pub fn update_chain(db: &DB, headers: &Vec<BlockHeader>) {
     }
     set_chain_height(&mut batch, cf, height);
 
-    db.write(batch);
+    db.write(batch).unwrap();
 }
 
 /// Get block locator to get blocks after given height

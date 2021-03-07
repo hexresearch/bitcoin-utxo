@@ -2,7 +2,6 @@ pub mod codec;
 pub mod message;
 
 use futures::pin_mut;
-use futures::sink;
 use futures::stream;
 use futures::{future, Sink, SinkExt, Stream, StreamExt};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -11,8 +10,6 @@ use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
 use bitcoin::consensus::encode;

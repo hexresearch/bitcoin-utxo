@@ -2,33 +2,17 @@
 extern crate bitcoin;
 extern crate bitcoin_utxo;
 
-use futures::future;
 use futures::pin_mut;
-use futures::stream;
-use futures::StreamExt;
-use rocksdb::DB;
 use std::{env, process};
 use std::error::Error;
 use std::net::SocketAddr;
-use std::str::FromStr;
 use std::sync::Arc;
-use tokio_stream::wrappers::ReceiverStream;
-use tokio::sync::mpsc;
 
-use bitcoin::blockdata;
-use bitcoin::BlockHash;
-use bitcoin::consensus::encode;
 use bitcoin::network::constants;
-use bitcoin::network::message_blockdata;
-use bitcoin::network::message_blockdata::Inventory;
-use bitcoin::network::message;
-use bitcoin::network::message::NetworkMessage;
 
 use bitcoin_utxo::connection::connect;
-use bitcoin_utxo::connection::message::process_messages;
 use bitcoin_utxo::sync::headers::sync_headers;
 use bitcoin_utxo::storage::init_storage;
-use bitcoin_utxo::storage::chain::{get_chain_height, get_block_locator, update_chain};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -62,16 +46,3 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
-
-// message::NetworkMessage::Inv(invs) => {
-//     let s = &sender;
-//     stream::iter(invs).for_each_concurrent(1, |inv| async move {
-//         match inv {
-//             Inventory::Block(hash) | Inventory::WitnessBlock(hash) => {
-//                 s.send(message::NetworkMessage::GetData(vec![inv])).await.unwrap();
-//                 println!("Sent request for block {:?}", hash);
-//             }
-//             _ => (),
-//         }
-//     }).await;
-// }
