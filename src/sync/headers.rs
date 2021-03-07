@@ -41,7 +41,7 @@ pub async fn sync_headers(db: Arc<DB>) -> (impl Stream<Item = NetworkMessage> + 
                 message::NetworkMessage::Inv(invs) => {
                     let s = synced.lock().unwrap();
                     if *s {
-                        stream::iter(invs).for_each_concurrent(1, |inv| {
+                        stream::iter(invs).for_each(|inv| {
                             let db = db.clone();
                             let sender = sender.clone();
                             async move {
