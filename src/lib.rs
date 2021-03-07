@@ -1,5 +1,6 @@
 pub mod connection;
 pub mod storage;
+pub mod sync;
 
 extern crate bitcoin_hashes;
 extern crate byte_strings;
