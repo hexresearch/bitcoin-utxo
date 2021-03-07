@@ -17,7 +17,7 @@ pub fn init_chain_storage(db: &DB) {
     db.write(batch);
 }
 
-pub fn update_chain(db: &DB, mut headers: Vec<BlockHeader>) {
+pub fn update_chain(db: &DB, headers: &Vec<BlockHeader>) {
     if headers.len() == 0 { return; }
     let cf = chain_famiy(db);
 
@@ -46,16 +46,22 @@ pub fn get_block_locator(db: &DB, height: u32) -> Vec<BlockHash> {
     hs
 }
 
+/// Get height of known main chain
+pub fn get_chain_height(db: &DB) -> u32 {
+    let cf = chain_famiy(db);
+    chain_height(db, cf)
+}
+
 /// Construct block locator height indecies to fetch blocks after given height
 fn get_locator_heights(height: u32) -> Vec<u32> {
     let mut is = vec![];
     let mut step = 1;
-    let mut i = height;
+    let mut i = height as i32;
     while i > 0 {
         if is.len() >= 10 {
             step *= 2;
         }
-        is.push(i);
+        is.push(i as u32);
         i -= step;
     }
     is.push(0);
