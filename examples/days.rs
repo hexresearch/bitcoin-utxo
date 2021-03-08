@@ -2,22 +2,26 @@
 extern crate bitcoin;
 extern crate bitcoin_utxo;
 
+use futures::future;
 use futures::pin_mut;
+use futures::SinkExt;
+use futures::stream;
 use std::{env, process};
 use std::error::Error;
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::io;
 
 use bitcoin::{BlockHeader, Transaction};
 use bitcoin::consensus::encode;
 use bitcoin::consensus::encode::{Decodable, Encodable};
 use bitcoin::network::constants;
 
-use bitcoin_utxo::connection::connect;
-use bitcoin_utxo::sync::headers::sync_headers;
-use bitcoin_utxo::storage::init_storage;
 use bitcoin_utxo::cache::utxo::new_cache;
+use bitcoin_utxo::connection::connect;
+use bitcoin_utxo::storage::init_storage;
+use bitcoin_utxo::sync::headers::sync_headers;
+use bitcoin_utxo::sync::utxo::sync_utxo;
 use bitcoin_utxo::utxo::UtxoState;
 
 #[derive(Debug, Copy, Clone)]
@@ -26,7 +30,7 @@ struct DaysCoin {
 }
 
 impl UtxoState for DaysCoin {
-    fn new_utxo(height: u32, header: &BlockHeader, tx: &Transaction, vout: u32) -> Self {
+    fn new_utxo(_height: u32, header: &BlockHeader, _tx: &Transaction, _vout: u32) -> Self {
         DaysCoin {
             created: header.time,
         }
@@ -65,18 +69,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let db = Arc::new(init_storage("./utxo_db")?);
     let cache = Arc::new(new_cache::<DaysCoin>());
 
-    let (msg_stream, msg_sink) = sync_headers(db).await;
-    pin_mut!(msg_sink);
+    let (headers_stream, headers_sink) = sync_headers(db.clone()).await;
+    pin_mut!(headers_sink);
+    let (sync_future, utxo_stream, utxo_sink) = sync_utxo(db, cache).await;
+    pin_mut!(utxo_sink);
 
-    connect(
+    let msg_stream = stream::select(headers_stream, utxo_stream);
+    let msg_sink = headers_sink.fanout(utxo_sink);
+    let conn_future = connect(
         &address,
         constants::Network::Bitcoin,
         "rust-client".to_string(),
         0,
         msg_stream,
         msg_sink,
-    )
-    .await?;
+    );
 
+    let (conn_res, _) = future::join(conn_future, sync_future).await;
+    conn_res.unwrap();
     Ok(())
 }

@@ -1,19 +1,12 @@
-use bitcoin_hashes::Hash;
-use bitcoin::blockdata;
-use bitcoin::blockdata::block::BlockHeader;
 use bitcoin::consensus::encode::{Decodable, Encodable, serialize, deserialize};
-use bitcoin::hash_types::BlockHash;
-use bitcoin::network::constants;
 use byteorder::{ByteOrder, BigEndian};
 use rocksdb::{DB, WriteBatch, ColumnFamily};
 
-use crate::utxo::{UtxoKey, encode_utxo_key, decode_utxo_key};
+use crate::utxo::{UtxoKey, encode_utxo_key};
 use crate::storage::scheme::utxo_famiy;
 
-pub fn init_utxo_storage(db: &DB) {
-    // let cf = utxo_famiy(db);
-    // let mut batch = WriteBatch::default();
-    // db.write(batch).unwrap();
+pub fn init_utxo_storage(_: &DB) {
+
 }
 
 pub fn utxo_store_insert<T: Encodable>(db: &DB, batch: &mut WriteBatch, k: &UtxoKey, v: &T) {
