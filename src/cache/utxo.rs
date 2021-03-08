@@ -6,8 +6,9 @@ use dashmap::mapref::one::Ref;
 use rocksdb::{DB, WriteBatch};
 use std::collections::hash_map::RandomState;
 
-use crate::utxo::{UtxoKey, UtxoState};
+use crate::storage::scheme::utxo_famiy;
 use crate::storage::utxo::*;
+use crate::utxo::{UtxoKey, UtxoState};
 
 /// Maximum fork depth after which we can flush UTXO to disk
 pub const UTXO_FORK_MAX_DEPTH: u32 = 100;
@@ -87,6 +88,8 @@ pub fn flush_utxo<T: Encodable>(db: &DB, cache: &UtxoCache<T>, h: u32) {
             _ => (),
         }
     }
+    let cf = utxo_famiy(db);
+    set_utxo_height(&mut batch, cf, h);
     db.write(batch).unwrap();
     ks.iter().for_each(|k| { cache.remove(k); } );
 }
