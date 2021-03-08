@@ -4,6 +4,7 @@ use bitcoin::consensus::encode::{Decodable, Encodable};
 use bitcoin::network::message_blockdata::Inventory;
 use bitcoin::network::message;
 use bitcoin::network::message::NetworkMessage;
+use chrono::Utc;
 use futures::Future;
 use futures::sink;
 use futures::sink::Sink;
@@ -42,7 +43,7 @@ pub async fn sync_utxo<T: UtxoState + Decodable + Encodable + Copy>(db: Arc<DB>,
                             let broad_sender = broad_sender.clone();
                             let msg_sender = msg_sender.clone();
                             async move {
-                                sync_block(db, cache, h, &broad_sender, &msg_sender).await;
+                                sync_block(db, cache, h, chain_h, &broad_sender, &msg_sender).await;
                             }
                         }).await;
                     }
@@ -55,12 +56,14 @@ pub async fn sync_utxo<T: UtxoState + Decodable + Encodable + Copy>(db: Arc<DB>,
     (sync_future, msg_stream, msg_sink)
 }
 
-async fn sync_block<T: UtxoState + Decodable + Encodable + Copy>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, h: u32, broad_sender: &broadcast::Sender<NetworkMessage>, msg_sender: &mpsc::Sender<NetworkMessage>)
+async fn sync_block<T: UtxoState + Decodable + Encodable + Copy>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, h: u32, maxh: u32, broad_sender: &broadcast::Sender<NetworkMessage>, msg_sender: &mpsc::Sender<NetworkMessage>)
 {
     let hash = get_block_hash(&db, h).unwrap();
     // println!("Requesting block {:?} and hash {:?}", h, hash);
     let block = request_block(&hash, broad_sender, msg_sender).await;
-    println!("UTXO processing block {:?}", h);
+    let now = Utc::now().format("%Y-%m-%d %H:%M:%S");
+    let progress = h as f32 / maxh as f32;
+    println!("{}: UTXO processing block {:?} ({:.2}%)", now, h, progress);
     for tx in block.txdata {
         update_utxo(&cache, h, &block.header, &tx);
     }
