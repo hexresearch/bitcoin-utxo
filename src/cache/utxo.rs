@@ -17,6 +17,10 @@ pub const UTXO_FORK_MAX_DEPTH: u32 = 100;
 /// and the most recent UTXO set in memory.
 pub type UtxoCache<T> = DashMap<UtxoKey, CoinChange<T>, RandomState>;
 
+pub fn new_cache<T>() -> UtxoCache<T> {
+    DashMap::new()
+}
+
 /// Tracks changes of UTXO set. Each N blocks we dump changes to disk, that allows to get
 /// cheap support for fork resistance. If fork is dected, we drop cache and start from
 /// storage backed state of UTXO.
