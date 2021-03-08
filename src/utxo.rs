@@ -14,7 +14,7 @@ pub fn encode_utxo_key(k: &UtxoKey) -> Vec<u8> {
 }
 
 pub fn decode_utxo_key(bs: Vec<u8>) -> Result<UtxoKey, Error> {
-    let txid = Txid::from_hash(Hash::from_slice(&bs[0 .. 31])?);
+    let txid = Txid::from_hash(Hash::from_slice(&bs[0 .. 32])?);
     let vout = BigEndian::read_u32(&bs[32..36]);
     Ok(OutPoint {
         txid: txid,

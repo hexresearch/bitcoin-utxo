@@ -5,6 +5,7 @@ use bitcoin::hash_types::BlockHash;
 use bitcoin::network::constants;
 use byteorder::{ByteOrder, BigEndian};
 use rocksdb::{DB, WriteBatch, ColumnFamily};
+use tokio::time::{sleep, Duration};
 
 use crate::storage::scheme::chain_famiy;
 
@@ -49,6 +50,23 @@ pub fn get_block_locator(db: &DB, height: u32) -> Vec<BlockHash> {
 pub fn get_chain_height(db: &DB) -> u32 {
     let cf = chain_famiy(db);
     chain_height(db, cf)
+}
+
+/// Makes futures that polls chain height and finishes when it is changed
+pub async fn chain_height_changes(db: &DB, dur: Duration) {
+    let cf = chain_famiy(db);
+    let starth = chain_height(db, cf);
+    let mut curh = starth;
+    while curh == starth {
+        sleep(dur).await;
+        curh = chain_height(db, cf);
+    }
+}
+
+/// Ask block hash for given height at main chain
+pub fn get_block_hash(db: &DB, height: u32) -> Option<BlockHash> {
+    let cf = chain_famiy(db);
+    get_block(db, cf, height)
 }
 
 /// Construct block locator height indecies to fetch blocks after given height
