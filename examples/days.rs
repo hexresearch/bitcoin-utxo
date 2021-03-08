@@ -7,8 +7,11 @@ use std::{env, process};
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::io;
 
 use bitcoin::{BlockHeader, Transaction};
+use bitcoin::consensus::encode;
+use bitcoin::consensus::encode::{Decodable, Encodable};
 use bitcoin::network::constants;
 
 use bitcoin_utxo::connection::connect;
@@ -17,6 +20,7 @@ use bitcoin_utxo::storage::init_storage;
 use bitcoin_utxo::cache::utxo::new_cache;
 use bitcoin_utxo::utxo::UtxoState;
 
+#[derive(Debug, Copy, Clone)]
 struct DaysCoin {
     created: u32,
 }
@@ -27,6 +31,20 @@ impl UtxoState for DaysCoin {
             created: header.time,
         }
     }
+}
+
+impl Encodable for DaysCoin {
+    fn consensus_encode<W: io::Write>(&self, writer: W) -> Result<usize, io::Error> {
+        let len = self.created.consensus_encode(writer)?;
+        Ok(len)
+    }
+}
+impl Decodable for DaysCoin {
+     fn consensus_decode<D: io::Read>(mut d: D) -> Result<Self, encode::Error> {
+         Ok(DaysCoin {
+             created: Decodable::consensus_decode(&mut d)?,
+         })
+     }
 }
 
 #[tokio::main]
