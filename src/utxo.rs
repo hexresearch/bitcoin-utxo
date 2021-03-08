@@ -1,5 +1,6 @@
 use bitcoin_hashes::{Hash, Error};
-use bitcoin::blockdata::transaction::OutPoint;
+use bitcoin::blockdata::block::BlockHeader;
+use bitcoin::blockdata::transaction::{Transaction, OutPoint};
 use bitcoin::hash_types::Txid;
 use byteorder::{ByteOrder, BigEndian};
 
@@ -19,4 +20,9 @@ pub fn decode_utxo_key(bs: Vec<u8>) -> Result<UtxoKey, Error> {
         txid: txid,
         vout: vout,
     })
+}
+
+/// Describes user defined state that is stored in UTXO records.
+pub trait UtxoState {
+    fn newUtxoState(height: u32, header: &BlockHeader, tx: &Transaction, vout: u32) -> Self;
 }
