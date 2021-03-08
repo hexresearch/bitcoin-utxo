@@ -24,5 +24,5 @@ pub fn decode_utxo_key(bs: Vec<u8>) -> Result<UtxoKey, Error> {
 
 /// Describes user defined state that is stored in UTXO records.
 pub trait UtxoState {
-    fn newUtxoState(height: u32, header: &BlockHeader, tx: &Transaction, vout: u32) -> Self;
+    fn new_utxo(height: u32, header: &BlockHeader, tx: &Transaction, vout: u32) -> Self;
 }
