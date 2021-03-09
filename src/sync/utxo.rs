@@ -62,7 +62,7 @@ async fn sync_block<T: UtxoState + Decodable + Encodable + Copy>(db: Arc<DB>, ca
     // println!("Requesting block {:?} and hash {:?}", h, hash);
     let block = request_block(&hash, broad_sender, msg_sender).await;
     let now = Utc::now().format("%Y-%m-%d %H:%M:%S");
-    let progress = h as f32 / maxh as f32;
+    let progress = 100.0 * h as f32 / maxh as f32;
     println!("{}: UTXO processing block {:?} ({:.2}%)", now, h, progress);
     for tx in block.txdata {
         update_utxo(&cache, h, &block.header, &tx);
