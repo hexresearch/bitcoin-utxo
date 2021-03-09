@@ -5,9 +5,11 @@ extern crate bitcoin_utxo;
 use futures::pin_mut;
 use futures::SinkExt;
 use futures::stream;
+use tokio::time::Duration;
 
 use rocksdb::DB;
 
+use std::time::{SystemTime, UNIX_EPOCH};
 use std::{env, process};
 use std::error::Error;
 use std::io;
@@ -22,8 +24,9 @@ use bitcoin::network::constants;
 use bitcoin_utxo::cache::utxo::new_cache;
 use bitcoin_utxo::connection::connect;
 use bitcoin_utxo::storage::init_storage;
+use bitcoin_utxo::storage::utxo::utxo_iterator;
 use bitcoin_utxo::sync::headers::sync_headers;
-use bitcoin_utxo::sync::utxo::sync_utxo;
+use bitcoin_utxo::sync::utxo::*;
 use bitcoin_utxo::utxo::UtxoState;
 
 #[derive(Debug, Copy, Clone)]
@@ -75,7 +78,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     pin_mut!(headers_sink);
     let (sync_future, utxo_stream, utxo_sink) = sync_utxo(db.clone(), cache).await;
     pin_mut!(utxo_sink);
-    let days_future = calc_days(db);
+    let days_future = watch_utxo_days(db);
 
 
     let msg_stream = stream::select(headers_stream, utxo_stream);
@@ -100,6 +103,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn calc_days(db: Arc<DB>) {
+async fn watch_utxo_days(db: Arc<DB>) {
+    loop {
+        wait_utxo_sync(db.clone(), Duration::from_secs(2)).await;
+        println!("Days calculation...");
+        let days = calc_days(db.clone());
+        println!("Average unspent days in UTXO: {:?}", days);
+        wait_utxo_height_changes(db.clone(), Duration::from_secs(2)).await;
+    }
+}
 
+const SECS_IN_DAY: u32 = 60 * 60 * 24;
+
+fn calc_days(db: Arc<DB>) -> f64 {
+    let start: u32 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs() as u32;
+    let start_days = start / SECS_IN_DAY;
+    let mut total_days = 0;
+    let mut n = 0;
+    for (_, v) in utxo_iterator::<DaysCoin>(&db) {
+        total_days += v.created / SECS_IN_DAY - start_days;
+        n += 1;
+    }
+    total_days as f64 / n as f64
 }

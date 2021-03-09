@@ -1,8 +1,9 @@
 use bitcoin::consensus::encode::{Decodable, Encodable, serialize, deserialize};
 use byteorder::{ByteOrder, BigEndian};
-use rocksdb::{DB, WriteBatch, ColumnFamily};
+use rocksdb::{DB, WriteBatch, ColumnFamily, DBIterator, IteratorMode};
+use std::marker::PhantomData;
 
-use crate::utxo::{UtxoKey, encode_utxo_key};
+use crate::utxo::*;
 use crate::storage::scheme::utxo_famiy;
 
 pub fn init_utxo_storage(_: &DB) {
@@ -45,4 +46,25 @@ pub fn utxo_height(db: &DB) -> u32 {
 pub fn set_utxo_height(batch: &mut WriteBatch, cf: &ColumnFamily, h: u32) {
     let val = height_value(h);
     batch.put_cf(cf, b"height", &val);
+}
+
+pub struct UtxoIterator<'a, T>(DBIterator<'a>, PhantomData<T>);
+
+impl<'a, T:Decodable> Iterator for UtxoIterator<'a, T> {
+    type Item = (UtxoKey, T);
+
+    fn next(&mut self) -> Option<(UtxoKey, T)> {
+        if let Some((kbs, vbs)) = self.0.next() {
+            let k = decode_utxo_key(kbs.to_vec()).expect("Utxo key is not parsable");
+            let v = deserialize(&vbs[..]).expect("Utxo value is not parsable");
+            Some((k, v))
+        } else {
+            None
+        }
+    }
+}
+
+/// Return iterator over all utxos
+pub fn utxo_iterator<'a, T: Decodable>(db: &'a DB) -> UtxoIterator<'a, T> {
+    UtxoIterator(db.iterator_cf(utxo_famiy(db), IteratorMode::Start), PhantomData)
 }

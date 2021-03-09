@@ -12,15 +12,42 @@ use futures::stream;
 use futures::stream::{Stream, StreamExt};
 use rocksdb::DB;
 use std::sync::Arc;
+
 use tokio_stream::wrappers::ReceiverStream;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
-use tokio::time::Duration;
+use tokio::time::{sleep, Duration};
 
 use crate::cache::utxo::{UtxoCache, update_utxo, finish_block};
 use crate::storage::chain::*;
 use crate::storage::utxo::utxo_height;
 use crate::utxo::UtxoState;
+
+/// Future blocks until utxo height == chain height
+pub async fn wait_utxo_sync(db: Arc<DB>, dur: Duration) {
+    loop {
+        let utxo_h = utxo_height(&db);
+        let chain_h = get_chain_height(&db);
+        if utxo_h == chain_h {
+            break;
+        } else {
+            sleep(dur).await;
+        }
+    }
+}
+
+/// Future that blocks until current height of utxo is changed
+pub async fn wait_utxo_height_changes(db: Arc<DB>, dur: Duration) {
+    let start_h = utxo_height(&db);
+    loop {
+        let cur_h = utxo_height(&db);
+        if cur_h == start_h {
+            sleep(dur).await;
+        } else {
+            break;
+        }
+    }
+}
 
 /// Request blocks from main chain for utxo and process them.
 pub async fn sync_utxo<T: UtxoState + Decodable + Encodable + Copy>(db: Arc<DB>, cache: Arc<UtxoCache<T>>) -> (impl Future<Output = ()>, impl Stream<Item = NetworkMessage> + Unpin, impl Sink<NetworkMessage, Error = encode::Error>)
