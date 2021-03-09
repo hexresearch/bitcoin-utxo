@@ -58,11 +58,32 @@ pub fn update_utxo<T: UtxoState>(cache: &UtxoCache<T>, h: u32, header: &BlockHea
 }
 
 fn remove_utxo<T>(cache: &UtxoCache<T>, h: u32, k: &UtxoKey) {
-    cache.insert(*k, CoinChange::<T>::Remove(h) );
+    let mut remove = false;
+    let mut insert = false;
+    match cache.get(k) {
+        None => insert = true,
+        Some(v) => match v.value() {
+            CoinChange::Pure(_) => insert = true,
+            CoinChange::Add(_, _) => remove = true,
+            CoinChange::Remove(_) => (),
+        },
+    };
+    if remove {
+        cache.remove(k);
+    } else if insert {
+        cache.insert(*k, CoinChange::<T>::Remove(h) );
+    }
 }
 
 fn add_utxo<T>(cache: &UtxoCache<T>, h: u32, k: &UtxoKey, t: T) {
-    cache.insert(*k, CoinChange::<T>::Add(t, h) );
+    let mut insert = false;
+    match cache.get(k) {
+        None => insert = true,
+        Some(_) => (),
+    }
+    if insert {
+        cache.insert(*k, CoinChange::<T>::Add(t, h) );
+    }
 }
 
 /// Flush UTXO to database if UTXO changes are old enough to avoid forks.
