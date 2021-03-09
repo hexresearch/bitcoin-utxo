@@ -15,6 +15,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::time::Duration;
+use hex;
 
 use bitcoin::util::bip158::BlockFilter;
 use bitcoin::util::bip158;
@@ -77,13 +78,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let (headers_stream, headers_sink) = sync_headers(db.clone()).await;
     pin_mut!(headers_sink);
-    let (sync_future, utxo_stream, utxo_sink) = sync_utxo_with(db.clone(), cache.clone(), move |block| {
+    let (sync_future, utxo_stream, utxo_sink) = sync_utxo_with(db.clone(), cache.clone(), move |h, block| {
         let block = block.clone();
         let db = db.clone();
         let cache = cache.clone();
         async move {
             let hash = block.block_hash();
             let filter = generate_filter(db.clone(), cache, block).await;
+            if h % 1000 == 0 {
+                println!("Filter for block {:?}: {:?}", h, hex::encode(&filter.content));
+            }
             store_filter(db, &hash, filter);
         }
     }).await;
@@ -114,7 +118,7 @@ async fn generate_filter(db: Arc<DB>, cache: Arc<UtxoCache<FilterCoin>>, block: 
     for tx in &block.txdata {
         if !tx.is_coin_base() {
             for i in &tx.input {
-                let coin = wait_utxo(db.clone(), cache.clone(), &i.previous_output, Duration::from_millis(1000)).await;
+                let coin = wait_utxo(db.clone(), cache.clone(), &i.previous_output, Duration::from_millis(100)).await;
                 hashmap.insert(i.previous_output, coin.script);
             }
         }

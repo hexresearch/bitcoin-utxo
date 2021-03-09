@@ -58,13 +58,13 @@ pub async fn sync_utxo<T>(db: Arc<DB>, cache: Arc<UtxoCache<T>>) -> (impl Future
     where
     T: UtxoState + Decodable + Encodable + Clone + Debug,
 {
-    sync_utxo_with(db, cache, |_| async move {}).await
+    sync_utxo_with(db, cache, |_, _| async move {}).await
 }
 
 pub async fn sync_utxo_with<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, with: F) -> (impl Future<Output = ()>, impl Stream<Item = NetworkMessage> + Unpin, impl Sink<NetworkMessage, Error = encode::Error>)
     where
     T: UtxoState + Decodable + Encodable + Clone + Debug,
-    F: FnMut(&Block) -> U + Clone,
+    F: FnMut(u32, &Block) -> U + Clone,
     U: Future<Output=()>,
 {
     const BUFFER_SIZE: usize = 100;
@@ -104,7 +104,7 @@ pub async fn sync_utxo_with<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, with
 async fn sync_block<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, h: u32, maxh: u32, mut with: F, broad_sender: &broadcast::Sender<NetworkMessage>, msg_sender: &mpsc::Sender<NetworkMessage>)
     where
     T: UtxoState + Decodable + Encodable + Clone + Debug,
-    F: FnMut(&Block) -> U,
+    F: FnMut(u32, &Block) -> U,
     U: Future<Output=()>,
 {
     let hash = get_block_hash(&db, h).unwrap();
@@ -116,7 +116,7 @@ async fn sync_block<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, h: u32, maxh
     for tx in &block.txdata {
         update_utxo_outputs(&cache, h, &block.header, &tx);
     }
-    with(&block).await;
+    with(h, &block).await;
     for tx in block.txdata {
         update_utxo_inputs(&db, &cache, h, &tx);
     }

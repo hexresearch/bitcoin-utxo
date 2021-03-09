@@ -10,6 +10,7 @@ extern crate byteorder;
 extern crate chrono;
 extern crate dashmap;
 extern crate futures;
+extern crate hex;
 extern crate rocksdb;
 extern crate tokio_stream;
 extern crate tokio_util;

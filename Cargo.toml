@@ -20,3 +20,4 @@ rocksdb = "0.15.0"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 tokio-util = { version = "^0.6", features = [ "codec" ] }
+hex = "0.4"
