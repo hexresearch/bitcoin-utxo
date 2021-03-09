@@ -6,20 +6,24 @@ use futures::pin_mut;
 use futures::SinkExt;
 use futures::stream;
 
-use rocksdb::DB;
+use rocksdb::{DB, WriteBatch};
 
 use std::{env, process};
+use std::collections::HashMap;
 use std::error::Error;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::time::Duration;
 
-use bitcoin::{BlockHeader, Block, Transaction, Script};
+use bitcoin::util::bip158::BlockFilter;
+use bitcoin::util::bip158;
+use bitcoin::{BlockHeader, Block, BlockHash, Transaction, Script, OutPoint};
 use bitcoin::consensus::encode;
 use bitcoin::consensus::encode::{Decodable, Encodable};
 use bitcoin::network::constants;
 
-use bitcoin_utxo::cache::utxo::new_cache;
+use bitcoin_utxo::cache::utxo::*;
 use bitcoin_utxo::connection::connect;
 use bitcoin_utxo::storage::init_storage;
 use bitcoin_utxo::sync::headers::sync_headers;
@@ -68,16 +72,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         process::exit(1);
     });
 
-    let db = Arc::new(init_storage("./filters_utxo_db")?);
+    let db = Arc::new(init_storage("./filters_utxo_db", vec!["filters"])?);
     let cache = Arc::new(new_cache::<FilterCoin>());
 
     let (headers_stream, headers_sink) = sync_headers(db.clone()).await;
     pin_mut!(headers_sink);
-    let (sync_future, utxo_stream, utxo_sink) = sync_utxo_with(db.clone(), cache, move |block| {
+    let (sync_future, utxo_stream, utxo_sink) = sync_utxo_with(db.clone(), cache.clone(), move |block| {
         let block = block.clone();
         let db = db.clone();
+        let cache = cache.clone();
         async move {
-            generate_filter(db, block).await
+            let hash = block.block_hash();
+            let filter = generate_filter(db.clone(), cache, block).await;
+            store_filter(db, &hash, filter);
         }
     }).await;
     pin_mut!(utxo_sink);
@@ -102,6 +109,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn generate_filter(db: Arc<DB>, block: Block) {
+async fn generate_filter(db: Arc<DB>, cache: Arc<UtxoCache<FilterCoin>>, block: Block) -> BlockFilter {
+    let mut hashmap = HashMap::<OutPoint, Script>::new();
+    for tx in &block.txdata {
+        if !tx.is_coin_base() {
+            for i in &tx.input {
+                let coin = wait_utxo(db.clone(), cache.clone(), &i.previous_output, Duration::from_millis(1000)).await;
+                hashmap.insert(i.previous_output, coin.script);
+            }
+        }
+    }
+    BlockFilter::new_script_filter(&block, |out| {
+        hashmap.get(out).map_or(Err(bip158::Error::UtxoMissing(*out)), |s| Ok(s.clone()))
+    }).unwrap()
+}
 
+fn store_filter(db: Arc<DB>, hash: &BlockHash, filter:BlockFilter) {
+    let cf = db.cf_handle("filters").unwrap();
+    let mut batch = WriteBatch::default();
+    batch.put_cf(cf, hash, filter.content);
+    db.write(batch).unwrap();
 }

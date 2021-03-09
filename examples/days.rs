@@ -72,7 +72,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         process::exit(1);
     });
 
-    let db = Arc::new(init_storage("./days_utxo_db")?);
+    let db = Arc::new(init_storage("./days_utxo_db", vec![])?);
     let cache = Arc::new(new_cache::<DaysCoin>());
 
     // overwite_chain_height(&db, 673837);

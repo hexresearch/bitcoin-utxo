@@ -23,6 +23,11 @@ use crate::storage::chain::*;
 use crate::storage::utxo::utxo_height;
 use crate::utxo::UtxoState;
 
+use std::fmt::Debug;
+
+/// Amount of blocks to process in parallel
+pub const PARALLEL_BLOCK: usize = 100;
+
 /// Future blocks until utxo height == chain height
 pub async fn wait_utxo_sync(db: Arc<DB>, dur: Duration) {
     loop {
@@ -51,14 +56,14 @@ pub async fn wait_utxo_height_changes(db: Arc<DB>, dur: Duration) {
 
 pub async fn sync_utxo<T>(db: Arc<DB>, cache: Arc<UtxoCache<T>>) -> (impl Future<Output = ()>, impl Stream<Item = NetworkMessage> + Unpin, impl Sink<NetworkMessage, Error = encode::Error>)
     where
-    T: UtxoState + Decodable + Encodable + Clone,
+    T: UtxoState + Decodable + Encodable + Clone + Debug,
 {
     sync_utxo_with(db, cache, |_| async move {}).await
 }
 
 pub async fn sync_utxo_with<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, with: F) -> (impl Future<Output = ()>, impl Stream<Item = NetworkMessage> + Unpin, impl Sink<NetworkMessage, Error = encode::Error>)
     where
-    T: UtxoState + Decodable + Encodable + Clone,
+    T: UtxoState + Decodable + Encodable + Clone + Debug,
     F: FnMut(&Block) -> U + Clone,
     U: Future<Output=()>,
 {
@@ -75,7 +80,7 @@ pub async fn sync_utxo_with<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, with
                     let chain_h = get_chain_height(&db);
                     println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
                     if chain_h > utxo_h {
-                        stream::iter(utxo_h+1 .. chain_h+1).for_each_concurrent(10, |h| {
+                        stream::iter(utxo_h+1 .. chain_h+1).for_each_concurrent(PARALLEL_BLOCK, |h| {
                             let db = db.clone();
                             let cache = cache.clone();
                             let broad_sender = broad_sender.clone();
@@ -98,7 +103,7 @@ pub async fn sync_utxo_with<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, with
 
 async fn sync_block<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, h: u32, maxh: u32, mut with: F, broad_sender: &broadcast::Sender<NetworkMessage>, msg_sender: &mpsc::Sender<NetworkMessage>)
     where
-    T: UtxoState + Decodable + Encodable + Clone,
+    T: UtxoState + Decodable + Encodable + Clone + Debug,
     F: FnMut(&Block) -> U,
     U: Future<Output=()>,
 {
@@ -113,7 +118,7 @@ async fn sync_block<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, h: u32, maxh
     }
     with(&block).await;
     for tx in block.txdata {
-        update_utxo_inputs(&cache, h, &tx);
+        update_utxo_inputs(&db, &cache, h, &tx);
     }
     finish_block(&db, &cache, h, false);
 }
