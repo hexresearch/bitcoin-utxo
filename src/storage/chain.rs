@@ -54,12 +54,11 @@ pub fn get_chain_height(db: &DB) -> u32 {
 
 /// Makes futures that polls chain height and finishes when it is changed
 pub async fn chain_height_changes(db: &DB, dur: Duration) {
-    let cf = chain_famiy(db);
-    let starth = chain_height(db, cf);
+    let starth = chain_height(db, chain_famiy(db));
     let mut curh = starth;
     while curh == starth {
         sleep(dur).await;
-        curh = chain_height(db, cf);
+        curh = chain_height(db, chain_famiy(db));
     }
 }
 

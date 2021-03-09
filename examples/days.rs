@@ -2,10 +2,12 @@
 extern crate bitcoin;
 extern crate bitcoin_utxo;
 
-use futures::future;
 use futures::pin_mut;
 use futures::SinkExt;
 use futures::stream;
+
+use rocksdb::DB;
+
 use std::{env, process};
 use std::error::Error;
 use std::io;
@@ -71,9 +73,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let (headers_stream, headers_sink) = sync_headers(db.clone()).await;
     pin_mut!(headers_sink);
-    let (sync_future, utxo_stream, utxo_sink) = sync_utxo(db, cache).await;
+    let (sync_future, utxo_stream, utxo_sink) = sync_utxo(db.clone(), cache).await;
     pin_mut!(utxo_sink);
+    let days_future = calc_days(db);
 
+
+    tokio::spawn(async move {
+        sync_future.await;
+    });
+    tokio::spawn(async move {
+        days_future.await;
+    });
     let msg_stream = stream::select(headers_stream, utxo_stream);
     let msg_sink = headers_sink.fanout(utxo_sink);
     let conn_future = connect(
@@ -84,8 +94,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         msg_stream,
         msg_sink,
     );
+    conn_future.await.unwrap();
 
-    let (conn_res, _) = future::join(conn_future, sync_future).await;
-    conn_res.unwrap();
     Ok(())
+}
+
+async fn calc_days(db: Arc<DB>) {
+
 }
