@@ -56,16 +56,16 @@ pub async fn wait_utxo_height_changes(db: Arc<DB>, dur: Duration) {
 
 pub async fn sync_utxo<T>(db: Arc<DB>, cache: Arc<UtxoCache<T>>) -> (impl Future<Output = ()>, impl Stream<Item = NetworkMessage> + Unpin, impl Sink<NetworkMessage, Error = encode::Error>)
     where
-    T: UtxoState + Decodable + Encodable + Clone + Debug,
+    T: UtxoState + Decodable + Encodable + Clone + Debug + Sync + Send + 'static,
 {
     sync_utxo_with(db, cache, |_, _| async move {}).await
 }
 
 pub async fn sync_utxo_with<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, with: F) -> (impl Future<Output = ()>, impl Stream<Item = NetworkMessage> + Unpin, impl Sink<NetworkMessage, Error = encode::Error>)
     where
-    T: UtxoState + Decodable + Encodable + Clone + Debug,
-    F: FnMut(u32, &Block) -> U + Clone,
-    U: Future<Output=()>,
+    T: UtxoState + Decodable + Encodable + Clone + Debug + Sync + Send + 'static,
+    F: FnMut(u32, &Block) -> U + Clone + Send + 'static,
+    U: Future<Output=()> + Send,
 {
     const BUFFER_SIZE: usize = 100;
     let (broad_sender, _) = broadcast::channel(100);
@@ -87,9 +87,15 @@ pub async fn sync_utxo_with<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, with
                             let msg_sender = msg_sender.clone();
                             let with = with.clone();
                             async move {
-                                sync_block(db, cache, h, chain_h, with, &broad_sender, &msg_sender).await;
+                                tokio::spawn(async move {
+                                    sync_block(db, cache, h, chain_h, with, &broad_sender, &msg_sender).await;
+                                }).await.unwrap()
                             }
+                            // async move {
+                            //
+                            // }
                         }).await;
+
                     }
                     finish_block(&db, &cache, chain_h, true);
                     chain_height_changes(&db, Duration::from_secs(10)).await;
