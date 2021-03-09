@@ -78,12 +78,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let days_future = calc_days(db);
 
 
-    tokio::spawn(async move {
-        sync_future.await;
-    });
-    tokio::spawn(async move {
-        days_future.await;
-    });
     let msg_stream = stream::select(headers_stream, utxo_stream);
     let msg_sink = headers_sink.fanout(utxo_sink);
     let conn_future = connect(
@@ -94,6 +88,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         msg_stream,
         msg_sink,
     );
+
+    tokio::spawn(async move {
+        sync_future.await;
+    });
+    tokio::spawn(async move {
+        days_future.await;
+    });
     conn_future.await.unwrap();
 
     Ok(())
