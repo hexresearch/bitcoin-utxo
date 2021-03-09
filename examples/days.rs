@@ -66,7 +66,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         process::exit(1);
     });
 
-    let db = Arc::new(init_storage("./utxo_db")?);
+    let db = Arc::new(init_storage("./days_utxo_db")?);
     let cache = Arc::new(new_cache::<DaysCoin>());
 
     let (headers_stream, headers_sink) = sync_headers(db.clone()).await;
