@@ -59,7 +59,7 @@ pub async fn sync_utxo<T>(db: Arc<DB>, cache: Arc<UtxoCache<T>>) -> (impl Future
 pub async fn sync_utxo_with<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, with: F) -> (impl Future<Output = ()>, impl Stream<Item = NetworkMessage> + Unpin, impl Sink<NetworkMessage, Error = encode::Error>)
     where
     T: UtxoState + Decodable + Encodable + Clone,
-    F: FnMut(&Block) -> U + Copy,
+    F: FnMut(&Block) -> U + Clone,
     U: Future<Output=()>,
 {
     const BUFFER_SIZE: usize = 100;
@@ -80,7 +80,7 @@ pub async fn sync_utxo_with<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, with
                             let cache = cache.clone();
                             let broad_sender = broad_sender.clone();
                             let msg_sender = msg_sender.clone();
-                            // let with = with.clone();
+                            let with = with.clone();
                             async move {
                                 sync_block(db, cache, h, chain_h, with, &broad_sender, &msg_sender).await;
                             }

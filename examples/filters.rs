@@ -14,7 +14,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use bitcoin::{BlockHeader, Transaction, Script};
+use bitcoin::{BlockHeader, Block, Transaction, Script};
 use bitcoin::consensus::encode;
 use bitcoin::consensus::encode::{Decodable, Encodable};
 use bitcoin::network::constants;
@@ -73,7 +73,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let (headers_stream, headers_sink) = sync_headers(db.clone()).await;
     pin_mut!(headers_sink);
-    let (sync_future, utxo_stream, utxo_sink) = sync_utxo_with(db.clone(), cache, |_| async move {}).await;
+    let (sync_future, utxo_stream, utxo_sink) = sync_utxo_with(db.clone(), cache, move |block| {
+        let block = block.clone();
+        let db = db.clone();
+        async move {
+            generate_filter(db, block).await
+        }
+    }).await;
     pin_mut!(utxo_sink);
 
 
@@ -94,4 +100,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     conn_future.await.unwrap();
 
     Ok(())
+}
+
+async fn generate_filter(db: Arc<DB>, block: Block) {
+
 }
