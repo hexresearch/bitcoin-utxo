@@ -49,12 +49,23 @@ pub async fn wait_utxo_height_changes(db: Arc<DB>, dur: Duration) {
     }
 }
 
-/// Request blocks from main chain for utxo and process them.
-pub async fn sync_utxo<T: UtxoState + Decodable + Encodable + Copy>(db: Arc<DB>, cache: Arc<UtxoCache<T>>) -> (impl Future<Output = ()>, impl Stream<Item = NetworkMessage> + Unpin, impl Sink<NetworkMessage, Error = encode::Error>)
+pub async fn sync_utxo<T>(db: Arc<DB>, cache: Arc<UtxoCache<T>>) -> (impl Future<Output = ()>, impl Stream<Item = NetworkMessage> + Unpin, impl Sink<NetworkMessage, Error = encode::Error>)
+    where
+    T: UtxoState + Decodable + Encodable + Clone,
+{
+    sync_utxo_with(db, cache, |_| async move {}).await
+}
+
+pub async fn sync_utxo_with<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, with: F) -> (impl Future<Output = ()>, impl Stream<Item = NetworkMessage> + Unpin, impl Sink<NetworkMessage, Error = encode::Error>)
+    where
+    T: UtxoState + Decodable + Encodable + Clone,
+    F: FnMut(&Block) -> U + Copy,
+    U: Future<Output=()>,
 {
     const BUFFER_SIZE: usize = 100;
     let (broad_sender, _) = broadcast::channel(100);
     let (msg_sender, msg_reciver) = mpsc::channel::<NetworkMessage>(BUFFER_SIZE);
+    // let with = Arc::new(with);
     let sync_future = {
             let broad_sender = broad_sender.clone();
             async move {
@@ -69,8 +80,9 @@ pub async fn sync_utxo<T: UtxoState + Decodable + Encodable + Copy>(db: Arc<DB>,
                             let cache = cache.clone();
                             let broad_sender = broad_sender.clone();
                             let msg_sender = msg_sender.clone();
+                            // let with = with.clone();
                             async move {
-                                sync_block(db, cache, h, chain_h, &broad_sender, &msg_sender).await;
+                                sync_block(db, cache, h, chain_h, with, &broad_sender, &msg_sender).await;
                             }
                         }).await;
                     }
@@ -83,7 +95,11 @@ pub async fn sync_utxo<T: UtxoState + Decodable + Encodable + Copy>(db: Arc<DB>,
     (sync_future, msg_stream, msg_sink)
 }
 
-async fn sync_block<T: UtxoState + Decodable + Encodable + Copy>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, h: u32, maxh: u32, broad_sender: &broadcast::Sender<NetworkMessage>, msg_sender: &mpsc::Sender<NetworkMessage>)
+async fn sync_block<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, h: u32, maxh: u32, mut with: F, broad_sender: &broadcast::Sender<NetworkMessage>, msg_sender: &mpsc::Sender<NetworkMessage>)
+    where
+    T: UtxoState + Decodable + Encodable + Clone,
+    F: FnMut(&Block) -> U,
+    U: Future<Output=()>,
 {
     let hash = get_block_hash(&db, h).unwrap();
     // println!("Requesting block {:?} and hash {:?}", h, hash);
@@ -91,6 +107,7 @@ async fn sync_block<T: UtxoState + Decodable + Encodable + Copy>(db: Arc<DB>, ca
     let now = Utc::now().format("%Y-%m-%d %H:%M:%S");
     let progress = 100.0 * h as f32 / maxh as f32;
     println!("{}: UTXO processing block {:?} ({:.2}%)", now, h, progress);
+    with(&block).await;
     for tx in block.txdata {
         update_utxo(&cache, h, &block.header, &tx);
     }

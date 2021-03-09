@@ -87,7 +87,7 @@ fn add_utxo<T>(cache: &UtxoCache<T>, h: u32, k: &UtxoKey, t: T) {
 }
 
 /// Flush UTXO to database if UTXO changes are old enough to avoid forks.
-pub fn finish_block<T: Encodable + Copy>(db: &DB, cache: &UtxoCache<T>, h: u32) {
+pub fn finish_block<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32) {
     if h > 0 && h % UTXO_FORK_MAX_DEPTH == 0 {
         println!("Writing UTXO to disk...");
         flush_utxo(db, cache, h-UTXO_FORK_MAX_DEPTH);
@@ -96,14 +96,14 @@ pub fn finish_block<T: Encodable + Copy>(db: &DB, cache: &UtxoCache<T>, h: u32) 
 }
 
 /// Flush all UTXO changes to database if change older or equal than given height.
-pub fn flush_utxo<T: Encodable + Copy>(db: &DB, cache: &UtxoCache<T>, h: u32) {
+pub fn flush_utxo<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32) {
     let mut ks = vec![];
     let mut batch = WriteBatch::default();
     for r in cache {
         let k = r.key();
         match r.value() {
             CoinChange::Add(t, add_h) if *add_h <= h => {
-                ks.push((*k, Some(*t)));
+                ks.push((*k, Some(t.clone())));
                 utxo_store_insert(db, &mut batch, k, &t);
             }
             CoinChange::Remove(del_h) if *del_h <= h => {
@@ -118,7 +118,7 @@ pub fn flush_utxo<T: Encodable + Copy>(db: &DB, cache: &UtxoCache<T>, h: u32) {
     db.write(batch).unwrap();
     ks.iter().for_each(|(k, mval)| {
         if let Some(t) = mval {
-            cache.insert(*k, CoinChange::Pure(*t));
+            cache.insert(*k, CoinChange::Pure(t.clone()));
         } else {
             cache.remove(k);
         }
