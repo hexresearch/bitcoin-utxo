@@ -86,6 +86,7 @@ pub async fn sync_utxo_with<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, with
                             }
                         }).await;
                     }
+                    finish_block(&db, &cache, chain_h, true);
                     chain_height_changes(&db, Duration::from_secs(10)).await;
                 }
             }
@@ -111,7 +112,7 @@ async fn sync_block<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, h: u32, maxh
     for tx in block.txdata {
         update_utxo(&cache, h, &block.header, &tx);
     }
-    finish_block(&db, &cache, h);
+    finish_block(&db, &cache, h, false);
 }
 
 /// Ask node about block and wait for reply.

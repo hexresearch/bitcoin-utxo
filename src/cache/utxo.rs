@@ -87,8 +87,10 @@ fn add_utxo<T>(cache: &UtxoCache<T>, h: u32, k: &UtxoKey, t: T) {
 }
 
 /// Flush UTXO to database if UTXO changes are old enough to avoid forks.
-pub fn finish_block<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32) {
-    if h > 0 && h % UTXO_FORK_MAX_DEPTH == 0 {
+pub fn finish_block<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32, force: bool) {
+    if force {
+        flush_utxo(db, cache, h);
+    } else if h > 0 && h % UTXO_FORK_MAX_DEPTH == 0 {
         println!("Writing UTXO to disk...");
         flush_utxo(db, cache, h-UTXO_FORK_MAX_DEPTH);
         println!("Writing UTXO to disk is done");

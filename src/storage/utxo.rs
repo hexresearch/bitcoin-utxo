@@ -55,9 +55,13 @@ impl<'a, T:Decodable> Iterator for UtxoIterator<'a, T> {
 
     fn next(&mut self) -> Option<(UtxoKey, T)> {
         if let Some((kbs, vbs)) = self.0.next() {
-            let k = decode_utxo_key(kbs.to_vec()).expect("Utxo key is not parsable");
-            let v = deserialize(&vbs[..]).expect("Utxo value is not parsable");
-            Some((k, v))
+            if b"height"[..] == *kbs  {
+                self.next()
+            } else {
+                let k = decode_utxo_key(kbs.to_vec()).expect("Utxo key is not parsable");
+                let v = deserialize(&vbs[..]).expect("Utxo value is not parsable");
+                Some((k, v))
+            }
         } else {
             None
         }
