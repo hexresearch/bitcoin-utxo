@@ -2,6 +2,7 @@
 extern crate bitcoin;
 extern crate bitcoin_utxo;
 
+use futures::future::{Abortable, AbortHandle, Aborted};
 use futures::pin_mut;
 use futures::SinkExt;
 use futures::stream;
@@ -76,39 +77,59 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let db = Arc::new(init_storage("./filters_utxo_db", vec!["filters"])?);
     let cache = Arc::new(new_cache::<FilterCoin>());
 
-    let (headers_stream, headers_sink) = sync_headers(db.clone()).await;
-    pin_mut!(headers_sink);
-    let (sync_future, utxo_stream, utxo_sink) = sync_utxo_with(db.clone(), cache.clone(), move |h, block| {
-        let block = block.clone();
+    loop {
+        let (headers_stream, headers_sink) = sync_headers(db.clone()).await;
+        pin_mut!(headers_sink);
         let db = db.clone();
         let cache = cache.clone();
-        async move {
-            let hash = block.block_hash();
-            let filter = generate_filter(db.clone(), cache, block).await;
-            if h % 1000 == 0 {
-                println!("Filter for block {:?}: {:?}", h, hex::encode(&filter.content));
+        let (sync_future, utxo_stream, utxo_sink) = sync_utxo_with(db.clone(), cache.clone(), move |h, block| {
+            let block = block.clone();
+            let db = db.clone();
+            let cache = cache.clone();
+            async move {
+                let hash = block.block_hash();
+                let filter = generate_filter(db.clone(), cache, block).await;
+                if h % 1000 == 0 {
+                    println!("Filter for block {:?}: {:?}", h, hex::encode(&filter.content));
+                }
+                store_filter(db, &hash, filter);
             }
-            store_filter(db, &hash, filter);
+        }).await;
+        pin_mut!(utxo_sink);
+
+        let (abort_handle, abort_registration) = AbortHandle::new_pair();
+        tokio::spawn(async move {
+            let res = Abortable::new(sync_future, abort_registration).await;
+            match res {
+                Err(Aborted) => eprintln!("Sync task was aborted!"),
+                _ => (),
+            }
+        });
+
+        let msg_stream = stream::select(headers_stream, utxo_stream);
+        let msg_sink = headers_sink.fanout(utxo_sink);
+
+        let res = connect(
+            &address,
+            constants::Network::Bitcoin,
+            "rust-client".to_string(),
+            0,
+            msg_stream,
+            msg_sink,
+        ).await;
+
+        match res {
+            Err(err) => {
+                abort_handle.abort();
+                eprintln!("Connection closed: {:?}. Reconnecting...", err);
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+            Ok(_) => {
+                println!("Gracefull termination");
+                break;
+            }
         }
-    }).await;
-    pin_mut!(utxo_sink);
-
-
-    let msg_stream = stream::select(headers_stream, utxo_stream);
-    let msg_sink = headers_sink.fanout(utxo_sink);
-    let conn_future = connect(
-        &address,
-        constants::Network::Bitcoin,
-        "rust-client".to_string(),
-        0,
-        msg_stream,
-        msg_sink,
-    );
-
-    tokio::spawn(async move {
-        sync_future.await;
-    });
-    conn_future.await.unwrap();
+    }
 
     Ok(())
 }
