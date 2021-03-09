@@ -25,6 +25,7 @@ use bitcoin_utxo::cache::utxo::new_cache;
 use bitcoin_utxo::connection::connect;
 use bitcoin_utxo::storage::init_storage;
 use bitcoin_utxo::storage::utxo::utxo_iterator;
+// use bitcoin_utxo::storage::chain::overwite_chain_height;
 use bitcoin_utxo::sync::headers::sync_headers;
 use bitcoin_utxo::sync::utxo::*;
 use bitcoin_utxo::utxo::UtxoState;
@@ -73,6 +74,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let db = Arc::new(init_storage("./days_utxo_db")?);
     let cache = Arc::new(new_cache::<DaysCoin>());
+
+    // overwite_chain_height(&db, 673837);
 
     let (headers_stream, headers_sink) = sync_headers(db.clone()).await;
     pin_mut!(headers_sink);

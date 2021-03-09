@@ -27,7 +27,7 @@ pub fn update_chain(db: &DB, headers: &Vec<BlockHeader>) {
         add_block_to_chain(&mut batch, cf, &header.block_hash(), height);
         height += 1;
     }
-    set_chain_height(&mut batch, cf, height);
+    set_chain_height(&mut batch, cf, height-1);
 
     db.write(batch).unwrap();
 }
@@ -50,6 +50,14 @@ pub fn get_block_locator(db: &DB, height: u32) -> Vec<BlockHash> {
 pub fn get_chain_height(db: &DB) -> u32 {
     let cf = chain_famiy(db);
     chain_height(db, cf)
+}
+
+/// Write down chain height to fixed size (used for restore)
+pub fn overwite_chain_height(db: &DB, h: u32) {
+    let cf = chain_famiy(db);
+    let mut batch = WriteBatch::default();
+    set_chain_height(&mut batch, cf, h);
+    db.write(batch).unwrap();
 }
 
 /// Makes futures that polls chain height and finishes when it is changed
