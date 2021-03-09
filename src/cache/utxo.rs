@@ -43,9 +43,19 @@ impl<T> CoinChange<T> {
 
 /// Remove all inputs from UTXO and add all outputs.
 pub fn update_utxo<T: UtxoState>(cache: &UtxoCache<T>, h: u32, header: &BlockHeader, tx: &Transaction) {
+    update_utxo_inputs(cache, h, tx);
+    update_utxo_outputs(cache, h, header, tx);
+}
+
+/// Remove all inputs of tx from UTXO set
+pub fn update_utxo_inputs<T>(cache: &UtxoCache<T>, h: u32, tx: &Transaction) {
     for txin in &tx.input {
         remove_utxo(cache, h, &txin.previous_output);
     }
+}
+
+/// Add all outputs of transaction to UTXO set
+pub fn update_utxo_outputs<T: UtxoState>(cache: &UtxoCache<T>, h: u32, header: &BlockHeader, tx: &Transaction) {
     let mut out = OutPoint {
         txid: tx.txid(),
         vout: 0,

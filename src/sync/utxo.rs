@@ -18,7 +18,7 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
-use crate::cache::utxo::{UtxoCache, update_utxo, finish_block};
+use crate::cache::utxo::*;
 use crate::storage::chain::*;
 use crate::storage::utxo::utxo_height;
 use crate::utxo::UtxoState;
@@ -108,9 +108,12 @@ async fn sync_block<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, h: u32, maxh
     let now = Utc::now().format("%Y-%m-%d %H:%M:%S");
     let progress = 100.0 * h as f32 / maxh as f32;
     println!("{}: UTXO processing block {:?} ({:.2}%)", now, h, progress);
+    for tx in &block.txdata {
+        update_utxo_outputs(&cache, h, &block.header, &tx);
+    }
     with(&block).await;
     for tx in block.txdata {
-        update_utxo(&cache, h, &block.header, &tx);
+        update_utxo_inputs(&cache, h, &tx);
     }
     finish_block(&db, &cache, h, false);
 }
