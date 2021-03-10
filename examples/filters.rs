@@ -92,7 +92,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let cache = cache.clone();
                 async move {
                     let hash = block.block_hash();
-                    let filter = generate_filter(db.clone(), cache, block).await;
+                    let filter = generate_filter(db.clone(), cache, h, block).await;
                     if h % 1000 == 0 {
                         println!(
                             "Filter for block {:?}: {:?}",
@@ -148,6 +148,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 async fn generate_filter(
     db: Arc<DB>,
     cache: Arc<UtxoCache<FilterCoin>>,
+    h: u32,
     block: Block,
 ) -> BlockFilter {
     let mut hashmap = HashMap::<OutPoint, Script>::new();
@@ -158,6 +159,7 @@ async fn generate_filter(
                     db.clone(),
                     cache.clone(),
                     &i.previous_output,
+                    h,
                     Duration::from_millis(100),
                 )
                 .await;
