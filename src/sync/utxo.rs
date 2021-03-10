@@ -181,23 +181,32 @@ async fn request_block(
     let mut receiver = broad_sender.subscribe();
     let mut block = None;
     while block == None {
-        let emsg = receiver.recv().await;
-        match emsg {
-            Err(broadcast::error::RecvError::Lagged(_)) => {
+        let resend_future = tokio::time::sleep(Duration::from_secs(5));
+        tokio::pin!(resend_future);
+        tokio::select!{
+            _ = &mut resend_future => {
+                println!("Resend request for block {:?}", hash);
                 let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
                 msg_sender.send(block_msg).await.unwrap();
             }
-            Err(e) => {
-                eprintln!("Request block {:?} failed with recv error: {:?}", hash, e);
-                panic!("Failed to request block");
-            }
-            Ok(msg) => match msg {
-                NetworkMessage::Block(b) if b.block_hash() == *hash => {
-                    block = Some(b);
+            emsg = receiver.recv() => match emsg {
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
+                    msg_sender.send(block_msg).await.unwrap();
                 }
-                _ => (),
-            },
+                Err(e) => {
+                    eprintln!("Request block {:?} failed with recv error: {:?}", hash, e);
+                    panic!("Failed to request block");
+                }
+                Ok(msg) => match msg {
+                    NetworkMessage::Block(b) if b.block_hash() == *hash => {
+                        block = Some(b);
+                    }
+                    _ => (),
+                },
+            }
         }
+
     }
     block.unwrap()
 }
