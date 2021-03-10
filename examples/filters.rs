@@ -2,28 +2,28 @@
 extern crate bitcoin;
 extern crate bitcoin_utxo;
 
-use futures::future::{Abortable, AbortHandle, Aborted};
+use futures::future::{AbortHandle, Abortable, Aborted};
 use futures::pin_mut;
-use futures::SinkExt;
 use futures::stream;
+use futures::SinkExt;
 
-use rocksdb::{DB, WriteBatch};
+use rocksdb::{WriteBatch, DB};
 
-use std::{env, process};
+use hex;
 use std::collections::HashMap;
 use std::error::Error;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::{env, process};
 use tokio::time::Duration;
-use hex;
 
-use bitcoin::util::bip158::BlockFilter;
-use bitcoin::util::bip158;
-use bitcoin::{BlockHeader, Block, BlockHash, Transaction, Script, OutPoint};
 use bitcoin::consensus::encode;
 use bitcoin::consensus::encode::{Decodable, Encodable};
 use bitcoin::network::constants;
+use bitcoin::util::bip158;
+use bitcoin::util::bip158::BlockFilter;
+use bitcoin::{Block, BlockHash, BlockHeader, OutPoint, Script, Transaction};
 
 use bitcoin_utxo::cache::utxo::*;
 use bitcoin_utxo::connection::connect;
@@ -52,11 +52,11 @@ impl Encodable for FilterCoin {
     }
 }
 impl Decodable for FilterCoin {
-     fn consensus_decode<D: io::Read>(mut d: D) -> Result<Self, encode::Error> {
-         Ok(FilterCoin {
-             script: Decodable::consensus_decode(&mut d)?,
-         })
-     }
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<Self, encode::Error> {
+        Ok(FilterCoin {
+            script: Decodable::consensus_decode(&mut d)?,
+        })
+    }
 }
 
 #[tokio::main]
@@ -85,19 +85,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         pin_mut!(headers_sink);
         let db = db.clone();
         let cache = cache.clone();
-        let (sync_future, utxo_stream, utxo_sink) = sync_utxo_with(db.clone(), cache.clone(), move |h, block| {
-            let block = block.clone();
-            let db = db.clone();
-            let cache = cache.clone();
-            async move {
-                let hash = block.block_hash();
-                let filter = generate_filter(db.clone(), cache, block).await;
-                if h % 1000 == 0 {
-                    println!("Filter for block {:?}: {:?}", h, hex::encode(&filter.content));
+        let (sync_future, utxo_stream, utxo_sink) =
+            sync_utxo_with(db.clone(), cache.clone(), move |h, block| {
+                let block = block.clone();
+                let db = db.clone();
+                let cache = cache.clone();
+                async move {
+                    let hash = block.block_hash();
+                    let filter = generate_filter(db.clone(), cache, block).await;
+                    if h % 1000 == 0 {
+                        println!(
+                            "Filter for block {:?}: {:?}",
+                            h,
+                            hex::encode(&filter.content)
+                        );
+                    }
+                    store_filter(db, &hash, filter);
                 }
-                store_filter(db, &hash, filter);
-            }
-        }).await;
+            })
+            .await;
         pin_mut!(utxo_sink);
 
         let (abort_handle, abort_registration) = AbortHandle::new_pair();
@@ -120,7 +126,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             0,
             msg_stream,
             msg_sink,
-        ).await;
+        )
+        .await;
 
         match res {
             Err(err) => {
@@ -138,22 +145,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn generate_filter(db: Arc<DB>, cache: Arc<UtxoCache<FilterCoin>>, block: Block) -> BlockFilter {
+async fn generate_filter(
+    db: Arc<DB>,
+    cache: Arc<UtxoCache<FilterCoin>>,
+    block: Block,
+) -> BlockFilter {
     let mut hashmap = HashMap::<OutPoint, Script>::new();
     for tx in &block.txdata {
         if !tx.is_coin_base() {
             for i in &tx.input {
-                let coin = wait_utxo(db.clone(), cache.clone(), &i.previous_output, Duration::from_millis(100)).await;
+                let coin = wait_utxo(
+                    db.clone(),
+                    cache.clone(),
+                    &i.previous_output,
+                    Duration::from_millis(100),
+                )
+                .await;
                 hashmap.insert(i.previous_output, coin.script);
             }
         }
     }
     BlockFilter::new_script_filter(&block, |out| {
-        hashmap.get(out).map_or(Err(bip158::Error::UtxoMissing(*out)), |s| Ok(s.clone()))
-    }).unwrap()
+        hashmap
+            .get(out)
+            .map_or(Err(bip158::Error::UtxoMissing(*out)), |s| Ok(s.clone()))
+    })
+    .unwrap()
 }
 
-fn store_filter(db: Arc<DB>, hash: &BlockHash, filter:BlockFilter) {
+fn store_filter(db: Arc<DB>, hash: &BlockHash, filter: BlockFilter) {
     let cf = db.cf_handle("filters").unwrap();
     let mut batch = WriteBatch::default();
     batch.put_cf(cf, hash, filter.content);

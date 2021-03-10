@@ -1,4 +1,4 @@
-use rocksdb::{DB, ColumnFamily, ColumnFamilyDescriptor, Options, Error};
+use rocksdb::{ColumnFamily, ColumnFamilyDescriptor, Error, Options, DB};
 
 const CHAIN_FAMILY: &str = "chain";
 const UTXO_FAMILY: &str = "utxo";
@@ -16,7 +16,10 @@ fn column_families(cfs: Vec<&str>) -> Vec<ColumnFamilyDescriptor> {
     for n in cfs {
         ret.push(ColumnFamilyDescriptor::new(n, Options::default()));
     }
-    ret.push(ColumnFamilyDescriptor::new(CHAIN_FAMILY, Options::default()));
+    ret.push(ColumnFamilyDescriptor::new(
+        CHAIN_FAMILY,
+        Options::default(),
+    ));
     ret.push(ColumnFamilyDescriptor::new(UTXO_FAMILY, Options::default()));
     ret
 }

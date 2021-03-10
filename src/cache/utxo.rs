@@ -1,12 +1,12 @@
-use bitcoin::blockdata::transaction::{Transaction, OutPoint};
 use bitcoin::blockdata::block::BlockHeader;
+use bitcoin::blockdata::transaction::{OutPoint, Transaction};
 use bitcoin::consensus::encode::{Decodable, Encodable};
-use dashmap::DashMap;
 use dashmap::mapref::one::Ref;
-use rocksdb::{DB, WriteBatch};
+use dashmap::DashMap;
+use rocksdb::{WriteBatch, DB};
 use std::collections::hash_map::RandomState;
 use std::sync::{Arc, Mutex};
-use tokio::time::{Duration, sleep};
+use tokio::time::{sleep, Duration};
 
 use crate::storage::scheme::utxo_famiy;
 use crate::storage::utxo::*;
@@ -42,27 +42,43 @@ impl<T> CoinChange<T> {
     pub fn payload(&self) -> &T {
         match self {
             CoinChange::Pure(t) => t,
-            CoinChange::Add(t,_) => t,
+            CoinChange::Add(t, _) => t,
             CoinChange::Remove(t, _, _) => t,
         }
     }
 }
 
 /// Remove all inputs from UTXO and add all outputs.
-pub fn update_utxo<T: UtxoState + Decodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32, header: &BlockHeader, tx: &Transaction) {
+pub fn update_utxo<T: UtxoState + Decodable + Clone>(
+    db: &DB,
+    cache: &UtxoCache<T>,
+    h: u32,
+    header: &BlockHeader,
+    tx: &Transaction,
+) {
     update_utxo_inputs(db, cache, h, tx);
     update_utxo_outputs(cache, h, header, tx);
 }
 
 /// Remove all inputs of tx from UTXO set
-pub fn update_utxo_inputs<T: Decodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32, tx: &Transaction) {
+pub fn update_utxo_inputs<T: Decodable + Clone>(
+    db: &DB,
+    cache: &UtxoCache<T>,
+    h: u32,
+    tx: &Transaction,
+) {
     for txin in &tx.input {
         remove_utxo(db, cache, h, &txin.previous_output);
     }
 }
 
 /// Add all outputs of transaction to UTXO set
-pub fn update_utxo_outputs<T: UtxoState>(cache: &UtxoCache<T>, h: u32, header: &BlockHeader, tx: &Transaction) {
+pub fn update_utxo_outputs<T: UtxoState>(
+    cache: &UtxoCache<T>,
+    h: u32,
+    header: &BlockHeader,
+    tx: &Transaction,
+) {
     let mut out = OutPoint {
         txid: tx.txid(),
         vout: 0,
@@ -98,12 +114,18 @@ fn add_utxo<T>(cache: &UtxoCache<T>, h: u32, k: &UtxoKey, t: T) {
         Some(_) => (),
     }
     if insert {
-        cache.insert(*k, CoinChange::<T>::Add(t, h) );
+        cache.insert(*k, CoinChange::<T>::Add(t, h));
     }
 }
 
 /// Flush UTXO to database if UTXO changes are old enough to avoid forks.
-pub fn finish_block<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, section: Arc<Mutex<()>>, h: u32, force: bool) {
+pub fn finish_block<T: Encodable + Clone>(
+    db: &DB,
+    cache: &UtxoCache<T>,
+    section: Arc<Mutex<()>>,
+    h: u32,
+    force: bool,
+) {
     let coins = cache.len();
     if force {
         flush_utxo(db, cache, h, coins > UTXO_CACHE_MAX_COINS);
@@ -112,7 +134,12 @@ pub fn finish_block<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, section
             Ok(_lock) => {
                 println!("UTXO cache size is {:?} coins", coins);
                 println!("Writing UTXO to disk...");
-                flush_utxo(db, cache, h-UTXO_FORK_MAX_DEPTH, coins > UTXO_CACHE_MAX_COINS);
+                flush_utxo(
+                    db,
+                    cache,
+                    h - UTXO_FORK_MAX_DEPTH,
+                    coins > UTXO_CACHE_MAX_COINS,
+                );
                 println!("Writing UTXO to disk is done");
             }
             _ => (),
@@ -128,11 +155,13 @@ pub fn flush_utxo<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32, f
         let k = r.key();
         match r.value() {
             CoinChange::Add(t, add_h) if *add_h <= h => {
-                ks.push((*k, Some(  CoinChange::Pure(t.clone()) )));
+                ks.push((*k, Some(CoinChange::Pure(t.clone()))));
                 utxo_store_insert(db, &mut batch, k, &t);
             }
-            CoinChange::Remove(t, add_h, del_h) if *add_h <= h && *del_h > h && *add_h != *del_h  => {
-                ks.push((*k, Some(  CoinChange::Remove(t.clone(), *add_h, *del_h) )));
+            CoinChange::Remove(t, add_h, del_h)
+                if *add_h <= h && *del_h > h && *add_h != *del_h =>
+            {
+                ks.push((*k, Some(CoinChange::Remove(t.clone(), *add_h, *del_h))));
                 utxo_store_insert(db, &mut batch, k, &t);
             }
             CoinChange::Remove(_, _, del_h) if *del_h <= h => {
@@ -158,7 +187,11 @@ pub fn flush_utxo<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32, f
 }
 
 /// Get UTXO coin from cache and if not found, load it from disk.
-pub fn get_utxo<'a, T: Decodable>(db: &DB, cache: &'a UtxoCache<T>, k: &UtxoKey) -> Option<Ref<'a, UtxoKey, CoinChange<T>>> {
+pub fn get_utxo<'a, T: Decodable>(
+    db: &DB,
+    cache: &'a UtxoCache<T>,
+    k: &UtxoKey,
+) -> Option<Ref<'a, UtxoKey, CoinChange<T>>> {
     match cache.get(k) {
         Some(r) => Some(r),
         None => {
@@ -175,7 +208,12 @@ pub fn get_utxo<'a, T: Decodable>(db: &DB, cache: &'a UtxoCache<T>, k: &UtxoKey)
 }
 
 /// Get UTXO coin from cache/storage and if not found, wait until it appears.
-pub async fn wait_utxo<T: Decodable + Clone>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, k: &UtxoKey, dur: Duration) -> T {
+pub async fn wait_utxo<T: Decodable + Clone>(
+    db: Arc<DB>,
+    cache: Arc<UtxoCache<T>>,
+    k: &UtxoKey,
+    dur: Duration,
+) -> T {
     let mut value = get_utxo(&db, &cache, k);
     loop {
         match value {
@@ -183,7 +221,7 @@ pub async fn wait_utxo<T: Decodable + Clone>(db: Arc<DB>, cache: Arc<UtxoCache<T
                 println!("Awaiting UTXO for {}", k);
                 sleep(dur).await;
                 value = get_utxo(&db, &cache, k);
-            },
+            }
             Some(v) => return v.value().payload().clone(),
         }
     }

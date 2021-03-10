@@ -1,10 +1,10 @@
-use bitcoin_hashes::Hash;
 use bitcoin::blockdata;
 use bitcoin::blockdata::block::BlockHeader;
 use bitcoin::hash_types::BlockHash;
 use bitcoin::network::constants;
-use byteorder::{ByteOrder, BigEndian};
-use rocksdb::{DB, WriteBatch, ColumnFamily};
+use bitcoin_hashes::Hash;
+use byteorder::{BigEndian, ByteOrder};
+use rocksdb::{ColumnFamily, WriteBatch, DB};
 use tokio::time::{sleep, Duration};
 
 use crate::storage::scheme::chain_famiy;
@@ -12,22 +12,25 @@ use crate::storage::scheme::chain_famiy;
 pub fn init_chain_storage(db: &DB) {
     let cf = chain_famiy(db);
     let mut batch = WriteBatch::default();
-    let genesis_hash = blockdata::constants::genesis_block(constants::Network::Bitcoin).block_hash();
+    let genesis_hash =
+        blockdata::constants::genesis_block(constants::Network::Bitcoin).block_hash();
     add_block_to_chain(&mut batch, cf, &genesis_hash, 0);
     db.write(batch).unwrap();
 }
 
 pub fn update_chain(db: &DB, headers: &Vec<BlockHeader>) {
-    if headers.len() == 0 { return; }
+    if headers.len() == 0 {
+        return;
+    }
     let cf = chain_famiy(db);
 
-    let mut height = block_height(db, cf, &headers[0].prev_blockhash).map_or(1, |h| h+1);
+    let mut height = block_height(db, cf, &headers[0].prev_blockhash).map_or(1, |h| h + 1);
     let mut batch = WriteBatch::default();
     for header in headers {
         add_block_to_chain(&mut batch, cf, &header.block_hash(), height);
         height += 1;
     }
-    set_chain_height(&mut batch, cf, height-1);
+    set_chain_height(&mut batch, cf, height - 1);
 
     db.write(batch).unwrap();
 }
@@ -93,16 +96,14 @@ fn get_locator_heights(height: u32) -> Vec<u32> {
 }
 
 /// Construct key with prefix for height->hash mapping
-fn block_height_key(h: u32) -> Vec<u8>
-{
+fn block_height_key(h: u32) -> Vec<u8> {
     let mut buf = [0; 4];
     BigEndian::write_u32(&mut buf, h);
     [vec![1u8], buf.to_vec()].concat()
 }
 
 /// Construct key with prefix for hash->height mapping
-fn block_hash_key(hash: &BlockHash) -> Vec<u8>
-{
+fn block_hash_key(hash: &BlockHash) -> Vec<u8> {
     [vec![0u8], hash.to_vec()].concat()
 }
 
@@ -115,7 +116,9 @@ fn height_value(h: u32) -> [u8; 4] {
 
 /// Get height of known main chain
 fn chain_height(db: &DB, cf: &ColumnFamily) -> u32 {
-    db.get_cf(cf, b"height").unwrap().map_or(0, |bs| BigEndian::read_u32(&bs))
+    db.get_cf(cf, b"height")
+        .unwrap()
+        .map_or(0, |bs| BigEndian::read_u32(&bs))
 }
 
 /// Put update of current height of main chain in batch
@@ -133,7 +136,9 @@ fn block_height(db: &DB, cf: &ColumnFamily, hash: &BlockHash) -> Option<u32> {
 /// Find block by height in main chain
 fn get_block(db: &DB, cf: &ColumnFamily, h: u32) -> Option<BlockHash> {
     let k = block_height_key(h);
-    db.get_cf(cf, k).unwrap().map(|bs| BlockHash::from_hash(Hash::from_slice(&bs).unwrap()))
+    db.get_cf(cf, k)
+        .unwrap()
+        .map(|bs| BlockHash::from_hash(Hash::from_slice(&bs).unwrap()))
 }
 
 /// Write all mapping between height and block hash to database

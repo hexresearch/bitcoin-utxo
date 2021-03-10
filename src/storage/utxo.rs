@@ -1,14 +1,12 @@
-use bitcoin::consensus::encode::{Decodable, Encodable, serialize, deserialize};
-use byteorder::{ByteOrder, BigEndian};
-use rocksdb::{DB, WriteBatch, ColumnFamily, DBIterator, IteratorMode};
+use bitcoin::consensus::encode::{deserialize, serialize, Decodable, Encodable};
+use byteorder::{BigEndian, ByteOrder};
+use rocksdb::{ColumnFamily, DBIterator, IteratorMode, WriteBatch, DB};
 use std::marker::PhantomData;
 
-use crate::utxo::*;
 use crate::storage::scheme::utxo_famiy;
+use crate::utxo::*;
 
-pub fn init_utxo_storage(_: &DB) {
-
-}
+pub fn init_utxo_storage(_: &DB) {}
 
 pub fn utxo_store_insert<T: Encodable>(db: &DB, batch: &mut WriteBatch, k: &UtxoKey, v: &T) {
     let cf = utxo_famiy(db);
@@ -26,7 +24,9 @@ pub fn utxo_store_delete(db: &DB, batch: &mut WriteBatch, k: &UtxoKey) {
 pub fn utxo_store_read<T: Decodable>(db: &DB, k: &UtxoKey) -> Option<T> {
     let cf = utxo_famiy(db);
     let kb = encode_utxo_key(k);
-    db.get_cf(cf, kb).unwrap().map(|bs| deserialize(&bs[..]).unwrap())
+    db.get_cf(cf, kb)
+        .unwrap()
+        .map(|bs| deserialize(&bs[..]).unwrap())
 }
 
 /// Construct value for height
@@ -39,7 +39,9 @@ fn height_value(h: u32) -> [u8; 4] {
 /// Get height of processed utxo
 pub fn utxo_height(db: &DB) -> u32 {
     let cf = utxo_famiy(db);
-    db.get_cf(cf, b"height").unwrap().map_or(0, |bs| BigEndian::read_u32(&bs))
+    db.get_cf(cf, b"height")
+        .unwrap()
+        .map_or(0, |bs| BigEndian::read_u32(&bs))
 }
 
 /// Put update of current height of main chain in batch
@@ -50,12 +52,12 @@ pub fn set_utxo_height(batch: &mut WriteBatch, cf: &ColumnFamily, h: u32) {
 
 pub struct UtxoIterator<'a, T>(DBIterator<'a>, PhantomData<T>);
 
-impl<'a, T:Decodable> Iterator for UtxoIterator<'a, T> {
+impl<'a, T: Decodable> Iterator for UtxoIterator<'a, T> {
     type Item = (UtxoKey, T);
 
     fn next(&mut self) -> Option<(UtxoKey, T)> {
         if let Some((kbs, vbs)) = self.0.next() {
-            if b"height"[..] == *kbs  {
+            if b"height"[..] == *kbs {
                 self.next()
             } else {
                 let k = decode_utxo_key(kbs.to_vec()).expect("Utxo key is not parsable");
@@ -70,5 +72,8 @@ impl<'a, T:Decodable> Iterator for UtxoIterator<'a, T> {
 
 /// Return iterator over all utxos
 pub fn utxo_iterator<'a, T: Decodable>(db: &'a DB) -> UtxoIterator<'a, T> {
-    UtxoIterator(db.iterator_cf(utxo_famiy(db), IteratorMode::Start), PhantomData)
+    UtxoIterator(
+        db.iterator_cf(utxo_famiy(db), IteratorMode::Start),
+        PhantomData,
+    )
 }

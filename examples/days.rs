@@ -3,23 +3,23 @@ extern crate bitcoin;
 extern crate bitcoin_utxo;
 
 use futures::pin_mut;
-use futures::SinkExt;
 use futures::stream;
+use futures::SinkExt;
 use tokio::time::Duration;
 
 use rocksdb::DB;
 
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::{env, process};
 use std::error::Error;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use std::{env, process};
 
-use bitcoin::{BlockHeader, Transaction};
 use bitcoin::consensus::encode;
 use bitcoin::consensus::encode::{Decodable, Encodable};
 use bitcoin::network::constants;
+use bitcoin::{BlockHeader, Transaction};
 
 use bitcoin_utxo::cache::utxo::new_cache;
 use bitcoin_utxo::connection::connect;
@@ -50,11 +50,11 @@ impl Encodable for DaysCoin {
     }
 }
 impl Decodable for DaysCoin {
-     fn consensus_decode<D: io::Read>(mut d: D) -> Result<Self, encode::Error> {
-         Ok(DaysCoin {
-             created: Decodable::consensus_decode(&mut d)?,
-         })
-     }
+    fn consensus_decode<D: io::Read>(mut d: D) -> Result<Self, encode::Error> {
+        Ok(DaysCoin {
+            created: Decodable::consensus_decode(&mut d)?,
+        })
+    }
 }
 
 #[tokio::main]
@@ -82,7 +82,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (sync_future, utxo_stream, utxo_sink) = sync_utxo(db.clone(), cache).await;
     pin_mut!(utxo_sink);
     let days_future = watch_utxo_days(db);
-
 
     let msg_stream = stream::select(headers_stream, utxo_stream);
     let msg_sink = headers_sink.fanout(utxo_sink);

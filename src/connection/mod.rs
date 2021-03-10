@@ -1,16 +1,16 @@
 pub mod codec;
 pub mod message;
 
+use futures::future::{AbortHandle, Abortable, Aborted};
 use futures::pin_mut;
 use futures::stream;
 use futures::{future, Sink, SinkExt, Stream, StreamExt};
-use futures::future::{Abortable, AbortHandle, Aborted};
+use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{
     error::Error,
     net::{IpAddr, Ipv4Addr, SocketAddr},
 };
-use std::io;
 use tokio::net::TcpStream;
 use tokio_util::codec::{FramedRead, FramedWrite};
 
@@ -70,27 +70,34 @@ pub async fn raw_connect(
     let mut stream = TcpStream::connect(addr).await?;
     let (r, w) = stream.split();
     let mut sink = FramedWrite::new(w, MessageCodec::new(network));
-    let mut stream = FramedRead::new(r, MessageCodec::new(network))
-        .filter_map(|i| match i {
-            Ok(i) => future::ready(Some(Ok(i))),
-            Err(e) => {
-                println!("Failed to read from socket; error={}", e);
-                abort_handle.abort();
-                future::ready(Some(Err(e)))
-            }
-        });
+    let mut stream = FramedRead::new(r, MessageCodec::new(network)).filter_map(|i| match i {
+        Ok(i) => future::ready(Some(Ok(i))),
+        Err(e) => {
+            println!("Failed to read from socket; error={}", e);
+            abort_handle.abort();
+            future::ready(Some(Err(e)))
+        }
+    });
 
     let mut inmsgs_err = inmsgs.map(Ok);
-    match Abortable::new(future::join(
-        sink.send_all(&mut inmsgs_err),
-        outmsgs.send_all(&mut stream),
-    ), abort_registration).await
+    match Abortable::new(
+        future::join(
+            sink.send_all(&mut inmsgs_err),
+            outmsgs.send_all(&mut stream),
+        ),
+        abort_registration,
+    )
+    .await
     {
-        Err(Aborted) => Err(encode::Error::Io(io::Error::new(io::ErrorKind::Other, "Connection closed!")).into()),
+        Err(Aborted) => Err(encode::Error::Io(io::Error::new(
+            io::ErrorKind::Other,
+            "Connection closed!",
+        ))
+        .into()),
         Ok(res) => match res {
             (Err(e), _) | (_, Err(e)) => Err(e.into()),
             _ => Ok(()),
-        }
+        },
     }
 }
 

@@ -12,6 +12,6 @@ extern crate dashmap;
 extern crate futures;
 extern crate hex;
 extern crate rocksdb;
+extern crate tokio;
 extern crate tokio_stream;
 extern crate tokio_util;
-extern crate tokio;

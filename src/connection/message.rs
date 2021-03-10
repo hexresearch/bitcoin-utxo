@@ -1,15 +1,17 @@
-use futures::sink::{Sink, unfold};
-use futures::stream::{Stream};
+use futures::sink::{unfold, Sink};
+use futures::stream::Stream;
 use futures::Future;
-use tokio_stream::wrappers::ReceiverStream;
 use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 
 /// Create a sink and a stream of messages that allows you to process message and then send another one
 /// as response.
-pub fn process_messages<'a, E, T, F, U>(f: F) -> (impl Stream<Item = T> + Unpin, impl Sink<T, Error = E>)
-    where
+pub fn process_messages<'a, E, T, F, U>(
+    f: F,
+) -> (impl Stream<Item = T> + Unpin, impl Sink<T, Error = E>)
+where
     F: FnMut(mpsc::Sender<T>, T) -> U,
-    U: Future<Output = mpsc::Sender<T>>
+    U: Future<Output = mpsc::Sender<T>>,
 {
     const BUFFER_SIZE: usize = 100;
     let (msg_sender, msg_reciver) = mpsc::channel::<T>(BUFFER_SIZE);

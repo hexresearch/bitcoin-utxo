@@ -1,8 +1,8 @@
-use bitcoin_hashes::{Hash, Error};
 use bitcoin::blockdata::block::BlockHeader;
-use bitcoin::blockdata::transaction::{Transaction, OutPoint};
+use bitcoin::blockdata::transaction::{OutPoint, Transaction};
 use bitcoin::hash_types::Txid;
-use byteorder::{ByteOrder, BigEndian};
+use bitcoin_hashes::{Error, Hash};
+use byteorder::{BigEndian, ByteOrder};
 
 /// Type of key that we use to address coin in utxo
 pub type UtxoKey = OutPoint;
@@ -14,7 +14,7 @@ pub fn encode_utxo_key(k: &UtxoKey) -> Vec<u8> {
 }
 
 pub fn decode_utxo_key(bs: Vec<u8>) -> Result<UtxoKey, Error> {
-    let txid = Txid::from_hash(Hash::from_slice(&bs[0 .. 32])?);
+    let txid = Txid::from_hash(Hash::from_slice(&bs[0..32])?);
     let vout = BigEndian::read_u32(&bs[32..36]);
     Ok(OutPoint { txid, vout })
 }
