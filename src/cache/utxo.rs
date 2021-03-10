@@ -18,7 +18,7 @@ pub const UTXO_FORK_MAX_DEPTH: u32 = 1000;
 /// Dump UTXO every given amount of blocks
 pub const UTXO_FLUSH_PERIOD: u32 = 30000;
 /// Dump UTXO if we get more than given amount of coins to save memory
-pub const UTXO_CACHE_MAX_COINS: usize = 25_000_000;
+pub const UTXO_CACHE_MAX_COINS: usize = 17_000_000;
 
 /// Cache of UTXO coins with T payload. We keep unrollbackable UTXO set in database
 /// and the most recent UTXO set in memory.
