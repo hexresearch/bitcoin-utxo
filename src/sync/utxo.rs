@@ -11,7 +11,7 @@ use futures::stream;
 use futures::stream::{Stream, StreamExt};
 use futures::Future;
 use rocksdb::DB;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -27,7 +27,7 @@ use crate::utxo::UtxoState;
 use std::fmt::Debug;
 
 /// Amount of blocks to process in parallel
-pub const PARALLEL_BLOCK: usize = 100;
+pub const PARALLEL_BLOCK: usize = 1000;
 
 /// Future blocks until utxo height == chain height
 pub async fn wait_utxo_sync(db: Arc<DB>, dur: Duration) {
@@ -91,11 +91,9 @@ where
         let broad_sender = broad_sender.clone();
         async move {
             wait_handshake(&broad_sender).await;
-            let flush_section = Arc::new(Mutex::new(()));
             loop {
                 let utxo_h = utxo_height(&db);
                 let chain_h = get_chain_height(&db);
-                let flush_section = flush_section.clone();
                 let barrier = Arc::new(Barrier::new(PARALLEL_BLOCK));
                 println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
                 if chain_h > utxo_h {
@@ -106,7 +104,6 @@ where
                             let broad_sender = broad_sender.clone();
                             let msg_sender = msg_sender.clone();
                             let with = with.clone();
-                            let flush_section = flush_section.clone();
                             let barrier = barrier.clone();
                             async move {
                                 tokio::spawn(async move {
@@ -120,8 +117,11 @@ where
                                         &msg_sender,
                                     )
                                     .await;
-                                    let _ = barrier.wait();
-                                    finish_block(&db, &cache, flush_section, h, false);
+                                    let res = barrier.wait().await;
+                                    if res.is_leader() {
+                                        finish_block(&db, &cache, h, false);
+                                    }
+                                    let _ = barrier.wait().await;
                                 })
                                 .await
                                 .unwrap()
@@ -129,7 +129,7 @@ where
                         })
                         .await;
                 }
-                finish_block(&db, &cache, flush_section, chain_h, true);
+                finish_block(&db, &cache, chain_h, true);
                 chain_height_changes(&db, Duration::from_secs(10)).await;
             }
         }

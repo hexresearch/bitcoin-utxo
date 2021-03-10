@@ -5,7 +5,7 @@ use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
 use rocksdb::{WriteBatch, DB};
 use std::collections::hash_map::RandomState;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
 use crate::storage::scheme::utxo_famiy;
@@ -122,7 +122,6 @@ fn add_utxo<T>(cache: &UtxoCache<T>, h: u32, k: &UtxoKey, t: T) {
 pub fn finish_block<T: Encodable + Clone>(
     db: &DB,
     cache: &UtxoCache<T>,
-    section: Arc<Mutex<()>>,
     h: u32,
     force: bool,
 ) {
@@ -130,20 +129,15 @@ pub fn finish_block<T: Encodable + Clone>(
     if force {
         flush_utxo(db, cache, h, coins > UTXO_CACHE_MAX_COINS);
     } else if h > 0 && (h % UTXO_FLUSH_PERIOD == 0 || coins > UTXO_CACHE_MAX_COINS) {
-        match section.try_lock() {
-            Ok(_lock) => {
-                println!("UTXO cache size is {:?} coins", coins);
-                println!("Writing UTXO to disk...");
-                flush_utxo(
-                    db,
-                    cache,
-                    h - UTXO_FORK_MAX_DEPTH,
-                    coins > UTXO_CACHE_MAX_COINS,
-                );
-                println!("Writing UTXO to disk is done");
-            }
-            _ => (),
-        }
+        println!("UTXO cache size is {:?} coins", coins);
+        println!("Writing UTXO to disk...");
+        flush_utxo(
+            db,
+            cache,
+            h - UTXO_FORK_MAX_DEPTH,
+            coins > UTXO_CACHE_MAX_COINS,
+        );
+        println!("Writing UTXO to disk is done");
     }
 }
 
