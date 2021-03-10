@@ -7,7 +7,7 @@ use futures::pin_mut;
 use futures::stream;
 use futures::SinkExt;
 
-use rocksdb::{WriteBatch, DB};
+use rocksdb::{WriteBatch, DB, WriteOptions};
 
 use hex;
 use std::collections::HashMap;
@@ -177,5 +177,9 @@ fn store_filter(db: Arc<DB>, hash: &BlockHash, filter: BlockFilter) {
     let cf = db.cf_handle("filters").unwrap();
     let mut batch = WriteBatch::default();
     batch.put_cf(cf, hash, filter.content);
-    db.write(batch).unwrap();
+
+    let mut write_options = WriteOptions::default();
+    write_options.set_sync(false);
+    write_options.disable_wal(true);
+    db.write_opt(batch, &write_options).unwrap();
 }
