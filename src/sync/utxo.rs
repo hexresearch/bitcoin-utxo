@@ -27,7 +27,7 @@ use crate::utxo::UtxoState;
 use std::fmt::Debug;
 
 /// Amount of blocks to process in parallel
-pub const PARALLEL_BLOCK: usize = 500;
+pub const PARALLEL_BLOCK: usize = 100;
 
 /// Future blocks until utxo height == chain height
 pub async fn wait_utxo_sync(db: Arc<DB>, dur: Duration) {
@@ -117,11 +117,7 @@ where
                                         &msg_sender,
                                     )
                                     .await;
-                                    let res = barrier.wait().await;
-                                    if res.is_leader() {
-                                        finish_block(&db, &cache, h, false);
-                                    }
-                                    let _ = barrier.wait().await;
+                                    finish_block_barrier(&db, &cache, h, false, barrier).await;
                                 })
                                 .await
                                 .unwrap()

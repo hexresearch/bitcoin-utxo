@@ -7,6 +7,7 @@ use rocksdb::{WriteBatch, DB};
 use std::collections::hash_map::RandomState;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
+use tokio::sync::Barrier;
 
 use crate::storage::scheme::utxo_famiy;
 use crate::storage::utxo::*;
@@ -141,6 +142,40 @@ pub fn finish_block<T: Encodable + Clone>(
     }
 }
 
+/// Flush UTXO to database if UTXO changes are old enough to avoid forks.
+pub async fn finish_block_barrier<T: Encodable + Clone>(
+    db: &DB,
+    cache: &UtxoCache<T>,
+    h: u32,
+    force: bool,
+    barrier: Arc<Barrier>,
+) {
+    let coins = cache.len();
+    if force {
+        let res = barrier.wait().await;
+        if res.is_leader() {
+            flush_utxo(db, cache, h, coins > UTXO_CACHE_MAX_COINS);
+        }
+        let _ = barrier.wait().await;
+    } else if h > 0 && (h % UTXO_FLUSH_PERIOD == 0 || coins > UTXO_CACHE_MAX_COINS) {
+        let res = barrier.wait().await;
+        if res.is_leader() {
+            println!("UTXO cache size is {:?} coins", coins);
+            println!("Writing UTXO to disk...");
+            flush_utxo(
+                db,
+                cache,
+                h - UTXO_FORK_MAX_DEPTH,
+                coins > UTXO_CACHE_MAX_COINS,
+            );
+            println!("Writing UTXO to disk is done");
+        }
+        let _ = barrier.wait().await;
+    }
+}
+
+
+
 /// Flush all UTXO changes to database if change older or equal than given height.
 pub fn flush_utxo<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32, flush_pure: bool) {
     let mut ks = vec![];
@@ -212,7 +247,7 @@ pub async fn wait_utxo<T: Decodable + Clone>(
     loop {
         match value {
             None => {
-                println!("Awaiting UTXO for {}", k);
+                // println!("Awaiting UTXO for {}", k);
                 sleep(dur).await;
                 value = get_utxo(&db, &cache, k);
             }
