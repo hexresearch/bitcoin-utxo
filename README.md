@@ -15,3 +15,10 @@ Demo that calculates BIP158 filters, expect heavy load on system and I recommend
 ```
 cargo run --example filters -- 127.0.0.1:8333
 ```
+
+# How to install toolchain 
+
+Steps for new in rust ecosystem:
+1) Install [rustup](https://rustup.rs/) either by entering nix shell in the repo or by official way.
+2) rustup toolchain install nightly
+3) rustup default nightly
