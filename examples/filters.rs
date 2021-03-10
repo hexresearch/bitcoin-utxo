@@ -74,7 +74,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         process::exit(1);
     });
 
-    let db = Arc::new(init_storage("./filters_utxo_db", vec!["filters"])?);
+    let dbname = "./filters_utxo_db";
+    println!("Opening database {:?}", dbname);
+    let db = Arc::new(init_storage(dbname, vec!["filters"])?);
+    println!("Creating cache");
     let cache = Arc::new(new_cache::<FilterCoin>());
 
     loop {
@@ -109,6 +112,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let msg_stream = stream::select(headers_stream, utxo_stream);
         let msg_sink = headers_sink.fanout(utxo_sink);
 
+        println!("Connecting to node");
         let res = connect(
             &address,
             constants::Network::Bitcoin,
