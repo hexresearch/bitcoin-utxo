@@ -11,9 +11,10 @@ use futures::sink::Sink;
 use futures::stream;
 use futures::stream::{Stream, StreamExt};
 use rocksdb::DB;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use tokio_stream::wrappers::ReceiverStream;
+use tokio::sync::Barrier;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
@@ -75,9 +76,12 @@ pub async fn sync_utxo_with<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, with
             let broad_sender = broad_sender.clone();
             async move {
                 wait_handshake(&broad_sender).await;
+                let flush_section = Arc::new(Mutex::new(()));
                 loop {
                     let utxo_h = utxo_height(&db);
                     let chain_h = get_chain_height(&db);
+                    let flush_section = flush_section.clone();
+                    let barrier = Arc::new(Barrier::new(PARALLEL_BLOCK));
                     println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
                     if chain_h > utxo_h {
                         stream::iter(utxo_h+1 .. chain_h+1).for_each_concurrent(PARALLEL_BLOCK, |h| {
@@ -86,18 +90,19 @@ pub async fn sync_utxo_with<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, with
                             let broad_sender = broad_sender.clone();
                             let msg_sender = msg_sender.clone();
                             let with = with.clone();
+                            let flush_section = flush_section.clone();
+                            let barrier = barrier.clone();
                             async move {
                                 tokio::spawn(async move {
-                                    sync_block(db, cache, h, chain_h, with, &broad_sender, &msg_sender).await;
+                                    sync_block(db.clone(), cache.clone(), h, chain_h, with, &broad_sender, &msg_sender).await;
+                                    let _ = barrier.wait();
+                                    finish_block(&db, &cache, flush_section, h, false);
                                 }).await.unwrap()
                             }
-                            // async move {
-                            //
-                            // }
                         }).await;
 
                     }
-                    finish_block(&db, &cache, chain_h, true);
+                    finish_block(&db, &cache, flush_section, chain_h, true);
                     chain_height_changes(&db, Duration::from_secs(10)).await;
                 }
             }
@@ -126,7 +131,6 @@ async fn sync_block<T, F, U>(db: Arc<DB>, cache: Arc<UtxoCache<T>>, h: u32, maxh
     for tx in block.txdata {
         update_utxo_inputs(&db, &cache, h, &tx);
     }
-    finish_block(&db, &cache, h, false);
 }
 
 /// Ask node about block and wait for reply.
@@ -136,12 +140,22 @@ async fn request_block(hash: &BlockHash, broad_sender: &broadcast::Sender<Networ
     let mut receiver = broad_sender.subscribe();
     let mut block = None;
     while block == None {
-        let msg = receiver.recv().await.unwrap();
-        match msg {
-            NetworkMessage::Block(b) if b.block_hash() == *hash => {
-                block = Some(b);
+        let emsg = receiver.recv().await;
+        match emsg {
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
+                msg_sender.send(block_msg).await.unwrap();
             }
-            _ => (),
+            Err(e) => {
+                eprintln!("Request block {:?} failed with recv error: {:?}", hash, e);
+                panic!("Failed to request block");
+            }
+            Ok(msg) => match msg {
+                NetworkMessage::Block(b) if b.block_hash() == *hash => {
+                    block = Some(b);
+                }
+                _ => (),
+            }
         }
     }
     block.unwrap()

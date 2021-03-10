@@ -5,7 +5,7 @@ use dashmap::DashMap;
 use dashmap::mapref::one::Ref;
 use rocksdb::{DB, WriteBatch};
 use std::collections::hash_map::RandomState;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::time::{Duration, sleep};
 
 use crate::storage::scheme::utxo_famiy;
@@ -16,6 +16,8 @@ use crate::utxo::{UtxoKey, UtxoState};
 pub const UTXO_FORK_MAX_DEPTH: u32 = 1000;
 /// Dump UTXO every given amount of blocks
 pub const UTXO_FLUSH_PERIOD: u32 = 30000;
+/// Dump UTXO if we get more than given amount of coins to save memory
+pub const UTXO_CACHE_MAX_COINS: usize = 10_000_000;
 
 /// Cache of UTXO coins with T payload. We keep unrollbackable UTXO set in database
 /// and the most recent UTXO set in memory.
@@ -101,18 +103,25 @@ fn add_utxo<T>(cache: &UtxoCache<T>, h: u32, k: &UtxoKey, t: T) {
 }
 
 /// Flush UTXO to database if UTXO changes are old enough to avoid forks.
-pub fn finish_block<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32, force: bool) {
+pub fn finish_block<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, section: Arc<Mutex<()>>, h: u32, force: bool) {
+    let coins = cache.len();
     if force {
-        flush_utxo(db, cache, h);
-    } else if h > 0 && h % UTXO_FLUSH_PERIOD == 0 {
-        println!("Writing UTXO to disk...");
-        flush_utxo(db, cache, h-UTXO_FORK_MAX_DEPTH);
-        println!("Writing UTXO to disk is done");
+        flush_utxo(db, cache, h, coins > UTXO_CACHE_MAX_COINS);
+    } else if h > 0 && (h % UTXO_FLUSH_PERIOD == 0 || coins > UTXO_CACHE_MAX_COINS) {
+        match section.try_lock() {
+            Ok(_lock) => {
+                println!("UTXO cache size is {:?} coins", coins);
+                println!("Writing UTXO to disk...");
+                flush_utxo(db, cache, h-UTXO_FORK_MAX_DEPTH, coins > UTXO_CACHE_MAX_COINS);
+                println!("Writing UTXO to disk is done");
+            }
+            _ => (),
+        }
     }
 }
 
 /// Flush all UTXO changes to database if change older or equal than given height.
-pub fn flush_utxo<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32) {
+pub fn flush_utxo<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32, flush_pure: bool) {
     let mut ks = vec![];
     let mut batch = WriteBatch::default();
     for r in cache {
@@ -129,6 +138,9 @@ pub fn flush_utxo<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32) {
             CoinChange::Remove(_, _, del_h) if *del_h <= h => {
                 ks.push((*k, None));
                 utxo_store_delete(db, &mut batch, k);
+            }
+            CoinChange::Pure(_) if flush_pure => {
+                ks.push((*k, None));
             }
             _ => (),
         }
