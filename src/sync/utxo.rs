@@ -124,6 +124,7 @@ where
                             }
                         })
                         .await;
+                    println!("UTXO sync finished");
                 }
                 finish_block(&db, &cache, chain_h, true);
                 chain_height_changes(&db, Duration::from_secs(10)).await;

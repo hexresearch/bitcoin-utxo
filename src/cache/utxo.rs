@@ -18,7 +18,7 @@ pub const UTXO_FORK_MAX_DEPTH: u32 = 1000;
 /// Dump UTXO every given amount of blocks
 pub const UTXO_FLUSH_PERIOD: u32 = 30000;
 /// Dump UTXO if we get more than given amount of coins to save memory
-pub const UTXO_CACHE_MAX_COINS: usize = 20_000_000;
+pub const UTXO_CACHE_MAX_COINS: usize = 25_000_000;
 
 /// Cache of UTXO coins with T payload. We keep unrollbackable UTXO set in database
 /// and the most recent UTXO set in memory.
@@ -128,14 +128,14 @@ pub fn finish_block<T: Encodable + Clone>(
 ) {
     let coins = cache.len();
     if force {
-        flush_utxo(db, cache, h - UTXO_FLUSH_PERIOD, h, coins > UTXO_CACHE_MAX_COINS);
+        flush_utxo(db, cache, h - UTXO_FLUSH_PERIOD/2, h, coins > UTXO_CACHE_MAX_COINS);
     } else if h > 0 && (h % UTXO_FLUSH_PERIOD == 0 || coins > UTXO_CACHE_MAX_COINS) {
         println!("UTXO cache size is {:?} coins", coins);
         println!("Writing UTXO to disk...");
         flush_utxo(
             db,
             cache,
-            h - UTXO_FLUSH_PERIOD,
+            h - UTXO_FLUSH_PERIOD/2,
             h - UTXO_FORK_MAX_DEPTH,
             coins > UTXO_CACHE_MAX_COINS,
         );
@@ -155,7 +155,7 @@ pub async fn finish_block_barrier<T: Encodable + Clone>(
     if force {
         let res = barrier.wait().await;
         if res.is_leader() {
-            flush_utxo(db, cache, h - UTXO_FLUSH_PERIOD, h, coins > UTXO_CACHE_MAX_COINS);
+            flush_utxo(db, cache, h - UTXO_FLUSH_PERIOD/2, h, coins > UTXO_CACHE_MAX_COINS);
         }
         let _ = barrier.wait().await;
     } else if h > 0 && (h % UTXO_FLUSH_PERIOD == 0 || coins > UTXO_CACHE_MAX_COINS) {
@@ -166,7 +166,7 @@ pub async fn finish_block_barrier<T: Encodable + Clone>(
             flush_utxo(
                 db,
                 cache,
-                h - UTXO_FLUSH_PERIOD,
+                h - UTXO_FLUSH_PERIOD/2,
                 h - UTXO_FORK_MAX_DEPTH,
                 coins > UTXO_CACHE_MAX_COINS,
             );
@@ -179,15 +179,16 @@ pub async fn finish_block_barrier<T: Encodable + Clone>(
 
 
 /// Flush all UTXO changes to database if change older or equal than given height.
-pub fn flush_utxo<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, prev_flush_h: u32, h: u32, flush_pure: bool) {
+pub fn flush_utxo<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, oldest_pure: u32, h: u32, flush_pure: bool) {
     let mut ks = vec![];
     let mut batch = WriteBatch::default();
-    let mid_h = (prev_flush_h + h) / 2;
     for r in cache {
         let k = r.key();
         match r.value() {
             CoinChange::Add(t, add_h) if *add_h <= h => {
-                ks.push((*k, Some(CoinChange::Pure(t.clone(), *add_h))));
+                if *add_h >= oldest_pure {
+                    ks.push((*k, Some(CoinChange::Pure(t.clone(), *add_h))));
+                }
                 utxo_store_insert(db, &mut batch, k, &t);
             }
             CoinChange::Remove(t, add_h, del_h)
@@ -200,7 +201,7 @@ pub fn flush_utxo<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, prev_flus
                 ks.push((*k, None));
                 utxo_store_delete(db, &mut batch, k);
             }
-            CoinChange::Pure(_, pure_h) if flush_pure && *pure_h <= mid_h => {
+            CoinChange::Pure(_, touch_h) if flush_pure && *touch_h < oldest_pure => {
                 ks.push((*k, None));
             }
             _ => (),
