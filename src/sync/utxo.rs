@@ -27,7 +27,7 @@ use crate::utxo::UtxoState;
 use std::fmt::Debug;
 
 /// Amount of blocks to process in parallel
-pub const PARALLEL_BLOCK: usize = 1000;
+pub const PARALLEL_BLOCK: usize = 500;
 
 /// Future blocks until utxo height == chain height
 pub async fn wait_utxo_sync(db: Arc<DB>, dur: Duration) {
