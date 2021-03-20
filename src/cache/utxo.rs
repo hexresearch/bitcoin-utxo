@@ -6,8 +6,8 @@ use dashmap::DashMap;
 use rocksdb::{WriteBatch, DB};
 use std::collections::hash_map::RandomState;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
 use tokio::sync::Barrier;
+use tokio::time::{sleep, Duration};
 
 use crate::storage::scheme::utxo_famiy;
 use crate::storage::utxo::*;
@@ -98,7 +98,7 @@ fn remove_utxo<T: Decodable + Clone>(db: &DB, cache: &UtxoCache<T>, h: u32, k: &
             insert = utxo_store_read(db, k);
         }
         Some(v) => match v.value() {
-            CoinChange::Pure(t,_) => insert = Some((t.clone(), h)),
+            CoinChange::Pure(t, _) => insert = Some((t.clone(), h)),
             CoinChange::Add(t, ah) => insert = Some((t.clone(), *ah)),
             CoinChange::Remove(_, _, _) => (),
         },
@@ -132,14 +132,14 @@ pub fn finish_block<T: Encodable + Clone>(
 ) {
     let coins = cache.len();
     if force {
-        flush_utxo(db, cache, h - flush_period/2, h, coins > max_coins);
+        flush_utxo(db, cache, h - flush_period / 2, h, coins > max_coins);
     } else if h > 0 && (h >= flush_height || coins > max_coins) {
         println!("UTXO cache size is {:?} coins", coins);
         println!("Writing UTXO to disk...");
         flush_utxo(
             db,
             cache,
-            h - flush_period/2,
+            h - flush_period / 2,
             h - fork_height,
             coins > max_coins,
         );
@@ -163,7 +163,7 @@ pub async fn finish_block_barrier<T: Encodable + Clone>(
     if force {
         let res = barrier.wait().await;
         if res.is_leader() {
-            flush_utxo(db, cache, h - flush_period/2, h, coins > max_coins);
+            flush_utxo(db, cache, h - flush_period / 2, h, coins > max_coins);
         }
         let _ = barrier.wait().await;
     } else if h > 0 && (h >= flush_height || coins > max_coins) {
@@ -174,7 +174,7 @@ pub async fn finish_block_barrier<T: Encodable + Clone>(
             flush_utxo(
                 db,
                 cache,
-                h - flush_period/2,
+                h - flush_period / 2,
                 h - fork_height,
                 coins > max_coins,
             );
@@ -184,10 +184,14 @@ pub async fn finish_block_barrier<T: Encodable + Clone>(
     }
 }
 
-
-
 /// Flush all UTXO changes to database if change older or equal than given height.
-pub fn flush_utxo<T: Encodable + Clone>(db: &DB, cache: &UtxoCache<T>, oldest_pure: u32, h: u32, flush_pure: bool) {
+pub fn flush_utxo<T: Encodable + Clone>(
+    db: &DB,
+    cache: &UtxoCache<T>,
+    oldest_pure: u32,
+    h: u32,
+    flush_pure: bool,
+) {
     let mut ks = vec![];
     let mut batch = WriteBatch::default();
     for r in cache {

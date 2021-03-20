@@ -70,7 +70,16 @@ pub async fn sync_utxo<T>(
 where
     T: UtxoState + Decodable + Encodable + Clone + Debug + Sync + Send + 'static,
 {
-    sync_utxo_with(db, cache, fork_height, max_coins, flush_period, block_batch, |_, _| async move {}).await
+    sync_utxo_with(
+        db,
+        cache,
+        fork_height,
+        max_coins,
+        flush_period,
+        block_batch,
+        |_, _| async move {},
+    )
+    .await
 }
 
 pub async fn sync_utxo_with<T, F, U>(
@@ -113,7 +122,7 @@ where
                             let msg_sender = msg_sender.clone();
                             let with = with.clone();
                             let barrier = barrier.clone();
-                            let flush_h = (h/flush_period + 1)*flush_period;
+                            let flush_h = (h / flush_period + 1) * flush_period;
                             async move {
                                 tokio::spawn(async move {
                                     sync_block(
@@ -126,7 +135,18 @@ where
                                         &msg_sender,
                                     )
                                     .await;
-                                    finish_block_barrier(&db, &cache, fork_height, max_coins, flush_period, flush_h, h, false, barrier).await;
+                                    finish_block_barrier(
+                                        &db,
+                                        &cache,
+                                        fork_height,
+                                        max_coins,
+                                        flush_period,
+                                        flush_h,
+                                        h,
+                                        false,
+                                        barrier,
+                                    )
+                                    .await;
                                 })
                                 .await
                                 .unwrap()
@@ -135,7 +155,16 @@ where
                         .await;
                     println!("UTXO sync finished");
                 }
-                finish_block(&db, &cache, fork_height, max_coins, flush_period, chain_h, chain_h, true);
+                finish_block(
+                    &db,
+                    &cache,
+                    fork_height,
+                    max_coins,
+                    flush_period,
+                    chain_h,
+                    chain_h,
+                    true,
+                );
                 chain_height_changes(&db, Duration::from_secs(10)).await;
             }
         }
@@ -189,7 +218,7 @@ async fn request_block(
     while block == None {
         let resend_future = tokio::time::sleep(Duration::from_secs(5));
         tokio::pin!(resend_future);
-        tokio::select!{
+        tokio::select! {
             _ = &mut resend_future => {
                 println!("Resend request for block {:?}", hash);
                 let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
@@ -212,7 +241,6 @@ async fn request_block(
                 },
             }
         }
-
     }
     block.unwrap()
 }

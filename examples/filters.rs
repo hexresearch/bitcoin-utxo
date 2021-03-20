@@ -7,7 +7,7 @@ use futures::pin_mut;
 use futures::stream;
 use futures::SinkExt;
 
-use rocksdb::{WriteBatch, DB, WriteOptions};
+use rocksdb::{WriteBatch, WriteOptions, DB};
 
 use hex;
 use std::collections::HashMap;
@@ -85,8 +85,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         pin_mut!(headers_sink);
         let db = db.clone();
         let cache = cache.clone();
-        let (sync_future, utxo_stream, utxo_sink) =
-            sync_utxo_with(db.clone(), cache.clone(), UTXO_FORK_MAX_DEPTH, UTXO_CACHE_MAX_COINS, UTXO_FLUSH_PERIOD, DEF_BLOCK_BATCH, move |h, block| {
+        let (sync_future, utxo_stream, utxo_sink) = sync_utxo_with(
+            db.clone(),
+            cache.clone(),
+            UTXO_FORK_MAX_DEPTH,
+            UTXO_CACHE_MAX_COINS,
+            UTXO_FLUSH_PERIOD,
+            DEF_BLOCK_BATCH,
+            move |h, block| {
                 let block = block.clone();
                 let db = db.clone();
                 let cache = cache.clone();
@@ -102,8 +108,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                     store_filter(db, &hash, filter);
                 }
-            })
-            .await;
+            },
+        )
+        .await;
         pin_mut!(utxo_sink);
 
         let (abort_handle, abort_registration) = AbortHandle::new_pair();

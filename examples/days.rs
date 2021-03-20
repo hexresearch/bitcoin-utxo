@@ -79,7 +79,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let (headers_stream, headers_sink) = sync_headers(db.clone()).await;
     pin_mut!(headers_sink);
-    let (sync_future, utxo_stream, utxo_sink) = sync_utxo(db.clone(), cache, UTXO_FORK_MAX_DEPTH, UTXO_CACHE_MAX_COINS, UTXO_FLUSH_PERIOD, DEF_BLOCK_BATCH).await;
+    let (sync_future, utxo_stream, utxo_sink) = sync_utxo(
+        db.clone(),
+        cache,
+        UTXO_FORK_MAX_DEPTH,
+        UTXO_CACHE_MAX_COINS,
+        UTXO_FLUSH_PERIOD,
+        DEF_BLOCK_BATCH,
+    )
+    .await;
     pin_mut!(utxo_sink);
     let days_future = watch_utxo_days(db);
 
