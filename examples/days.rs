@@ -21,7 +21,7 @@ use bitcoin::consensus::encode::{Decodable, Encodable};
 use bitcoin::network::constants;
 use bitcoin::{BlockHeader, Transaction};
 
-use bitcoin_utxo::cache::utxo::new_cache;
+use bitcoin_utxo::cache::utxo::*;
 use bitcoin_utxo::connection::connect;
 use bitcoin_utxo::storage::init_storage;
 use bitcoin_utxo::storage::utxo::utxo_iterator;
@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let (headers_stream, headers_sink) = sync_headers(db.clone()).await;
     pin_mut!(headers_sink);
-    let (sync_future, utxo_stream, utxo_sink) = sync_utxo(db.clone(), cache).await;
+    let (sync_future, utxo_stream, utxo_sink) = sync_utxo(db.clone(), cache, UTXO_FORK_MAX_DEPTH, UTXO_CACHE_MAX_COINS, UTXO_FLUSH_PERIOD, DEF_BLOCK_BATCH).await;
     pin_mut!(utxo_sink);
     let days_future = watch_utxo_days(db);
 

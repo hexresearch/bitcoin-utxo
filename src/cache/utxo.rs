@@ -14,9 +14,9 @@ use crate::storage::utxo::*;
 use crate::utxo::{UtxoKey, UtxoState};
 
 /// Maximum fork depth after which we can flush UTXO to disk
-pub const UTXO_FORK_MAX_DEPTH: u32 = 1000;
+pub const UTXO_FORK_MAX_DEPTH: u32 = 100;
 /// Dump UTXO every given amount of blocks
-pub const UTXO_FLUSH_PERIOD: u32 = 30000;
+pub const UTXO_FLUSH_PERIOD: u32 = 15000;
 /// Dump UTXO if we get more than given amount of coins to save memory
 pub const UTXO_CACHE_MAX_COINS: usize = 25_000_000;
 
@@ -123,21 +123,25 @@ fn add_utxo<T>(cache: &UtxoCache<T>, h: u32, k: &UtxoKey, t: T) {
 pub fn finish_block<T: Encodable + Clone>(
     db: &DB,
     cache: &UtxoCache<T>,
+    fork_height: u32,
+    max_coins: usize,
+    flush_period: u32,
+    flush_height: u32,
     h: u32,
     force: bool,
 ) {
     let coins = cache.len();
     if force {
-        flush_utxo(db, cache, h - UTXO_FLUSH_PERIOD/2, h, coins > UTXO_CACHE_MAX_COINS);
-    } else if h > 0 && (h % UTXO_FLUSH_PERIOD == 0 || coins > UTXO_CACHE_MAX_COINS) {
+        flush_utxo(db, cache, h - flush_period/2, h, coins > max_coins);
+    } else if h > 0 && (h >= flush_height || coins > max_coins) {
         println!("UTXO cache size is {:?} coins", coins);
         println!("Writing UTXO to disk...");
         flush_utxo(
             db,
             cache,
-            h - UTXO_FLUSH_PERIOD/2,
-            h - UTXO_FORK_MAX_DEPTH,
-            coins > UTXO_CACHE_MAX_COINS,
+            h - flush_period/2,
+            h - fork_height,
+            coins > max_coins,
         );
         println!("Writing UTXO to disk is done");
     }
@@ -147,6 +151,10 @@ pub fn finish_block<T: Encodable + Clone>(
 pub async fn finish_block_barrier<T: Encodable + Clone>(
     db: &DB,
     cache: &UtxoCache<T>,
+    fork_height: u32,
+    max_coins: usize,
+    flush_period: u32,
+    flush_height: u32,
     h: u32,
     force: bool,
     barrier: Arc<Barrier>,
@@ -155,10 +163,10 @@ pub async fn finish_block_barrier<T: Encodable + Clone>(
     if force {
         let res = barrier.wait().await;
         if res.is_leader() {
-            flush_utxo(db, cache, h - UTXO_FLUSH_PERIOD/2, h, coins > UTXO_CACHE_MAX_COINS);
+            flush_utxo(db, cache, h - flush_period/2, h, coins > max_coins);
         }
         let _ = barrier.wait().await;
-    } else if h > 0 && (h % UTXO_FLUSH_PERIOD == 0 || coins > UTXO_CACHE_MAX_COINS) {
+    } else if h > 0 && (h >= flush_height || coins > max_coins) {
         let res = barrier.wait().await;
         if res.is_leader() {
             println!("UTXO cache size is {:?} coins", coins);
@@ -166,9 +174,9 @@ pub async fn finish_block_barrier<T: Encodable + Clone>(
             flush_utxo(
                 db,
                 cache,
-                h - UTXO_FLUSH_PERIOD/2,
-                h - UTXO_FORK_MAX_DEPTH,
-                coins > UTXO_CACHE_MAX_COINS,
+                h - flush_period/2,
+                h - fork_height,
+                coins > max_coins,
             );
             println!("Writing UTXO to disk is done");
         }

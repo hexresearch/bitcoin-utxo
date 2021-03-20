@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let db = db.clone();
         let cache = cache.clone();
         let (sync_future, utxo_stream, utxo_sink) =
-            sync_utxo_with(db.clone(), cache.clone(), move |h, block| {
+            sync_utxo_with(db.clone(), cache.clone(), UTXO_FORK_MAX_DEPTH, UTXO_CACHE_MAX_COINS, UTXO_FLUSH_PERIOD, DEF_BLOCK_BATCH, move |h, block| {
                 let block = block.clone();
                 let db = db.clone();
                 let cache = cache.clone();
