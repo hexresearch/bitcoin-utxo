@@ -114,8 +114,8 @@ where
                 println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
                 if chain_h > utxo_h {
                     // We should add padding futures at end of sync to successfully finish sync
-                    let upper_h = (((chain_h + 1) as f32) / (block_batch as f32)).ceil() as u32;
-                    stream::iter(utxo_h + 1..upper_h)
+                    let upper_h = ((((chain_h + 1) as f32) / (block_batch as f32)).ceil() * block_batch as f32) as u32;
+                    stream::iter((utxo_h + 1) .. upper_h)
                         .for_each_concurrent(block_batch, |h| {
                             let db = db.clone();
                             let cache = cache.clone();
