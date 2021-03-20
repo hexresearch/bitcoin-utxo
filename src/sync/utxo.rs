@@ -114,8 +114,11 @@ where
                 println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
                 if chain_h > utxo_h {
                     // We should add padding futures at end of sync to successfully finish sync
-                    let upper_h = ((((chain_h + 1) as f32) / (block_batch as f32)).ceil() * block_batch as f32) as u32;
-                    stream::iter((utxo_h + 1) .. upper_h)
+                    let clip_batch = (((chain_h as f32) / (block_batch as f32)).ceil() * block_batch as f32) as u32;
+                    let min_batch = utxo_h + block_batch as u32;
+                    let upper_h = min_batch.max(clip_batch);
+                    println!("{:?}", upper_h);
+                    stream::iter(utxo_h + 1 .. upper_h + 1)
                         .for_each_concurrent(block_batch, |h| {
                             let db = db.clone();
                             let cache = cache.clone();
@@ -123,13 +126,10 @@ where
                             let msg_sender = msg_sender.clone();
                             let with = with.clone();
                             let barrier = barrier.clone();
-                            let flush_h = (h / (flush_period + block_batch as u32 + 1) + 1) * flush_period;
+                            let flush_h = utxo_height(&db) + flush_period;
                             async move {
-                                if h > chain_h { // If we are padding thread, just wait on barriers
-                                    let _ = barrier.wait().await;
-                                    let _ = barrier.wait().await;
-                                } else {
-                                    tokio::spawn(async move {
+                                tokio::spawn(async move {
+                                    if h <= chain_h { // If we are padding thread, just wait on barriers
                                         sync_block(
                                             db.clone(),
                                             cache.clone(),
@@ -140,22 +140,22 @@ where
                                             &msg_sender,
                                         )
                                         .await;
-                                        finish_block_barrier(
-                                            &db,
-                                            &cache,
-                                            fork_height,
-                                            max_coins,
-                                            flush_period,
-                                            flush_h,
-                                            h,
-                                            false,
-                                            barrier,
-                                        )
-                                        .await;
-                                    })
-                                    .await
-                                    .unwrap();
-                                }
+                                    }
+                                    finish_block_barrier(
+                                        &db,
+                                        &cache,
+                                        fork_height,
+                                        max_coins,
+                                        flush_period,
+                                        flush_h,
+                                        h,
+                                        false,
+                                        barrier,
+                                    )
+                                    .await;
+                                })
+                                .await
+                                .unwrap();
                             }
                         })
                         .await;

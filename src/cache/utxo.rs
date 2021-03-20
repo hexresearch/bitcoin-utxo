@@ -85,9 +85,11 @@ pub fn update_utxo_outputs<T: UtxoState>(
         vout: 0,
     };
     for i in 0..tx.output.len() {
-        out.vout = i as u32;
-        let t = T::new_utxo(h, header, &tx, i as u32);
-        add_utxo(cache, h, &out, t);
+        if !tx.output[i].script_pubkey.is_op_return() {
+            out.vout = i as u32;
+            let t = T::new_utxo(h, header, &tx, i as u32);
+            add_utxo(cache, h, &out, t);
+        }
     }
 }
 
@@ -131,9 +133,11 @@ pub fn finish_block<T: Encodable + Clone>(
     force: bool,
 ) {
     let coins = cache.len();
-    if force {
-        flush_utxo(db, cache, h - flush_period / 2, h, coins > max_coins);
-    } else if h > 0 && (h >= flush_height || coins > max_coins) {
+    if force && h > fork_height {
+        println!("Writing UTXO to disk...");
+        flush_utxo(db, cache, h - flush_period / 2, h - fork_height, coins > max_coins);
+        println!("Writing UTXO to disk is done");
+    } else if h > fork_height && (h >= flush_height || coins > max_coins) {
         println!("UTXO cache size is {:?} coins", coins);
         println!("Writing UTXO to disk...");
         flush_utxo(
@@ -160,17 +164,20 @@ pub async fn finish_block_barrier<T: Encodable + Clone>(
     barrier: Arc<Barrier>,
 ) {
     let coins = cache.len();
-    if force {
+    if force && h > fork_height {
         let res = barrier.wait().await;
         if res.is_leader() {
-            flush_utxo(db, cache, h - flush_period / 2, h, coins > max_coins);
+            println!("Writing UTXO to disk...");
+            flush_utxo(db, cache, h - flush_period / 2, h - fork_height, coins > max_coins);
+            println!("Writing UTXO to disk is done");
         }
         let _ = barrier.wait().await;
-    } else if h > 0 && (h >= flush_height || coins > max_coins) {
+    } else if h > fork_height && (h >= flush_height || coins > max_coins) {
         let res = barrier.wait().await;
         if res.is_leader() {
             println!("UTXO cache size is {:?} coins", coins);
             println!("Writing UTXO to disk...");
+            println!("H is {:?} and flush height is {:?}", h, flush_height);
             flush_utxo(
                 db,
                 cache,
