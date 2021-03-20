@@ -184,12 +184,12 @@ async fn request_block(
             _ = &mut resend_future => {
                 println!("Resend request for block {:?}", hash);
                 let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
-                msg_sender.send(block_msg).await.unwrap();
+                msg_sender.send(block_msg).await.or_else(());
             }
             emsg = receiver.recv() => match emsg {
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
-                    msg_sender.send(block_msg).await.unwrap();
+                    msg_sender.send(block_msg).await.or_else(());
                 }
                 Err(e) => {
                     eprintln!("Request block {:?} failed with recv error: {:?}", hash, e);
