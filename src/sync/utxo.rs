@@ -17,7 +17,7 @@ use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::sync::Barrier;
 use tokio::time::{sleep, Duration};
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::cache::utxo::*;
 use crate::storage::chain::*;
@@ -102,7 +102,7 @@ where
 {
     const BUFFER_SIZE: usize = 100;
     let (broad_sender, _) = broadcast::channel(BUFFER_SIZE);
-    let (msg_sender, msg_reciver) = mpsc::channel::<NetworkMessage>(BUFFER_SIZE);
+    let (msg_sender, msg_reciver) = mpsc::unbounded_channel::<NetworkMessage>();
     let sync_future = {
         let broad_sender = broad_sender.clone();
         async move {
@@ -175,7 +175,7 @@ where
             }
         }
     };
-    let msg_stream = ReceiverStream::new(msg_reciver);
+    let msg_stream = UnboundedReceiverStream::new(msg_reciver);
     let msg_sink = sink::unfold(broad_sender, |broad_sender, msg| async move {
         broad_sender.send(msg).unwrap_or(0);
         Ok::<_, encode::Error>(broad_sender)
@@ -190,7 +190,7 @@ async fn sync_block<T, F, U>(
     maxh: u32,
     mut with: F,
     broad_sender: &broadcast::Sender<NetworkMessage>,
-    msg_sender: &mpsc::Sender<NetworkMessage>,
+    msg_sender: &mpsc::UnboundedSender<NetworkMessage>,
 ) where
     T: UtxoState + Decodable + Encodable + Clone + Debug,
     F: FnMut(u32, &Block) -> U,
@@ -215,10 +215,10 @@ async fn sync_block<T, F, U>(
 async fn request_block(
     hash: &BlockHash,
     broad_sender: &broadcast::Sender<NetworkMessage>,
-    msg_sender: &mpsc::Sender<NetworkMessage>,
+    msg_sender: &mpsc::UnboundedSender<NetworkMessage>,
 ) -> Block {
     let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
-    msg_sender.send(block_msg).await.unwrap();
+    msg_sender.send(block_msg).unwrap_or_else(|e| { println!("Error when requesting block: {:?}", e); });
     let mut receiver = broad_sender.subscribe();
     let mut block = None;
     while block == None {
@@ -228,12 +228,12 @@ async fn request_block(
             _ = &mut resend_future => {
                 println!("Resend request for block {:?}", hash);
                 let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
-                msg_sender.send(block_msg).await.unwrap_or_else(|e| { println!("Error when requesting block: {:?}", e); });
+                msg_sender.send(block_msg).unwrap_or_else(|e| { println!("Error when requesting block: {:?}", e); });
             }
             emsg = receiver.recv() => match emsg {
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
-                    msg_sender.send(block_msg).await.unwrap_or_else(|e| { println!("Error when requesting block: {:?}", e); });
+                    msg_sender.send(block_msg).unwrap_or_else(|e| { println!("Error when requesting block: {:?}", e); });
                 }
                 Err(e) => {
                     eprintln!("Request block {:?} failed with recv error: {:?}", hash, e);
