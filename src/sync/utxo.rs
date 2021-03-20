@@ -122,7 +122,7 @@ where
                             let msg_sender = msg_sender.clone();
                             let with = with.clone();
                             let barrier = barrier.clone();
-                            let flush_h = (h / flush_period + 1) * flush_period;
+                            let flush_h = (h / (flush_period + block_batch as u32 + 1) + 1) * flush_period;
                             async move {
                                 tokio::spawn(async move {
                                     sync_block(
