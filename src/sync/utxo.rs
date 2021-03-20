@@ -27,7 +27,7 @@ use crate::utxo::UtxoState;
 use std::fmt::Debug;
 
 /// Amount of blocks to process in parallel
-pub const PARALLEL_BLOCK: usize = 100;
+pub const DEF_BLOCK_BATCH: usize = 100;
 
 /// Future blocks until utxo height == chain height
 pub async fn wait_utxo_sync(db: Arc<DB>, dur: Duration) {
@@ -58,6 +58,10 @@ pub async fn wait_utxo_height_changes(db: Arc<DB>, dur: Duration) {
 pub async fn sync_utxo<T>(
     db: Arc<DB>,
     cache: Arc<UtxoCache<T>>,
+    fork_height: u32,
+    max_coins: usize,
+    flush_period: u32,
+    block_batch: usize,
 ) -> (
     impl Future<Output = ()>,
     impl Stream<Item = NetworkMessage> + Unpin,
@@ -66,12 +70,25 @@ pub async fn sync_utxo<T>(
 where
     T: UtxoState + Decodable + Encodable + Clone + Debug + Sync + Send + 'static,
 {
-    sync_utxo_with(db, cache, |_, _| async move {}).await
+    sync_utxo_with(
+        db,
+        cache,
+        fork_height,
+        max_coins,
+        flush_period,
+        block_batch,
+        |_, _| async move {},
+    )
+    .await
 }
 
 pub async fn sync_utxo_with<T, F, U>(
     db: Arc<DB>,
     cache: Arc<UtxoCache<T>>,
+    fork_height: u32,
+    max_coins: usize,
+    flush_period: u32,
+    block_batch: usize,
     with: F,
 ) -> (
     impl Future<Output = ()>,
@@ -84,7 +101,7 @@ where
     U: Future<Output = ()> + Send,
 {
     const BUFFER_SIZE: usize = 100;
-    let (broad_sender, _) = broadcast::channel(100);
+    let (broad_sender, _) = broadcast::channel(BUFFER_SIZE);
     let (msg_sender, msg_reciver) = mpsc::channel::<NetworkMessage>(BUFFER_SIZE);
     // let with = Arc::new(with);
     let sync_future = {
@@ -94,17 +111,18 @@ where
             loop {
                 let utxo_h = utxo_height(&db);
                 let chain_h = get_chain_height(&db);
-                let barrier = Arc::new(Barrier::new(PARALLEL_BLOCK));
+                let barrier = Arc::new(Barrier::new(block_batch));
                 println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
                 if chain_h > utxo_h {
                     stream::iter(utxo_h + 1..chain_h + 1)
-                        .for_each_concurrent(PARALLEL_BLOCK, |h| {
+                        .for_each_concurrent(block_batch, |h| {
                             let db = db.clone();
                             let cache = cache.clone();
                             let broad_sender = broad_sender.clone();
                             let msg_sender = msg_sender.clone();
                             let with = with.clone();
                             let barrier = barrier.clone();
+                            let flush_h = (h / (flush_period + block_batch as u32 + 1) + 1) * flush_period;
                             async move {
                                 tokio::spawn(async move {
                                     sync_block(
@@ -117,7 +135,18 @@ where
                                         &msg_sender,
                                     )
                                     .await;
-                                    finish_block_barrier(&db, &cache, h, false, barrier).await;
+                                    finish_block_barrier(
+                                        &db,
+                                        &cache,
+                                        fork_height,
+                                        max_coins,
+                                        flush_period,
+                                        flush_h,
+                                        h,
+                                        false,
+                                        barrier,
+                                    )
+                                    .await;
                                 })
                                 .await
                                 .unwrap()
@@ -126,7 +155,16 @@ where
                         .await;
                     println!("UTXO sync finished");
                 }
-                finish_block(&db, &cache, chain_h, true);
+                finish_block(
+                    &db,
+                    &cache,
+                    fork_height,
+                    max_coins,
+                    flush_period,
+                    chain_h,
+                    chain_h,
+                    true,
+                );
                 chain_height_changes(&db, Duration::from_secs(10)).await;
             }
         }
@@ -180,16 +218,16 @@ async fn request_block(
     while block == None {
         let resend_future = tokio::time::sleep(Duration::from_secs(5));
         tokio::pin!(resend_future);
-        tokio::select!{
+        tokio::select! {
             _ = &mut resend_future => {
                 println!("Resend request for block {:?}", hash);
                 let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
-                msg_sender.send(block_msg).await.unwrap();
+                msg_sender.send(block_msg).await.unwrap_or_else(|e| { println!("Error when requesting block: {:?}", e); });
             }
             emsg = receiver.recv() => match emsg {
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
-                    msg_sender.send(block_msg).await.unwrap();
+                    msg_sender.send(block_msg).await.unwrap_or_else(|e| { println!("Error when requesting block: {:?}", e); });
                 }
                 Err(e) => {
                     eprintln!("Request block {:?} failed with recv error: {:?}", hash, e);
@@ -203,7 +241,6 @@ async fn request_block(
                 },
             }
         }
-
     }
     block.unwrap()
 }
