@@ -114,7 +114,8 @@ where
                 let barrier = Arc::new(Barrier::new(block_batch));
                 println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
                 if chain_h > utxo_h {
-                    stream::iter(utxo_h + 1..chain_h + 1)
+                    let upper_h = (((chain_h + 1) as f32) / (block_batch as f32)).ceil() as u32;
+                    stream::iter(utxo_h + 1..upper_h)
                         .for_each_concurrent(block_batch, |h| {
                             let db = db.clone();
                             let cache = cache.clone();
@@ -124,32 +125,37 @@ where
                             let barrier = barrier.clone();
                             let flush_h = (h / (flush_period + block_batch as u32 + 1) + 1) * flush_period;
                             async move {
-                                tokio::spawn(async move {
-                                    sync_block(
-                                        db.clone(),
-                                        cache.clone(),
-                                        h,
-                                        chain_h,
-                                        with,
-                                        &broad_sender,
-                                        &msg_sender,
-                                    )
-                                    .await;
-                                    finish_block_barrier(
-                                        &db,
-                                        &cache,
-                                        fork_height,
-                                        max_coins,
-                                        flush_period,
-                                        flush_h,
-                                        h,
-                                        false,
-                                        barrier,
-                                    )
-                                    .await;
-                                })
-                                .await
-                                .unwrap()
+                                if h > chain_h {
+                                    let _ = barrier.wait().await;
+                                    let _ = barrier.wait().await;
+                                } else {
+                                    tokio::spawn(async move {
+                                        sync_block(
+                                            db.clone(),
+                                            cache.clone(),
+                                            h,
+                                            chain_h,
+                                            with,
+                                            &broad_sender,
+                                            &msg_sender,
+                                        )
+                                        .await;
+                                        finish_block_barrier(
+                                            &db,
+                                            &cache,
+                                            fork_height,
+                                            max_coins,
+                                            flush_period,
+                                            flush_h,
+                                            h,
+                                            false,
+                                            barrier,
+                                        )
+                                        .await;
+                                    })
+                                    .await
+                                    .unwrap();
+                                }
                             }
                         })
                         .await;
