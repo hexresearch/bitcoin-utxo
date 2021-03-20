@@ -103,7 +103,6 @@ where
     const BUFFER_SIZE: usize = 100;
     let (broad_sender, _) = broadcast::channel(BUFFER_SIZE);
     let (msg_sender, msg_reciver) = mpsc::channel::<NetworkMessage>(BUFFER_SIZE);
-    // let with = Arc::new(with);
     let sync_future = {
         let broad_sender = broad_sender.clone();
         async move {
@@ -114,6 +113,7 @@ where
                 let barrier = Arc::new(Barrier::new(block_batch));
                 println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
                 if chain_h > utxo_h {
+                    // We should add padding futures at end of sync to successfully finish sync
                     let upper_h = (((chain_h + 1) as f32) / (block_batch as f32)).ceil() as u32;
                     stream::iter(utxo_h + 1..upper_h)
                         .for_each_concurrent(block_batch, |h| {
@@ -125,7 +125,7 @@ where
                             let barrier = barrier.clone();
                             let flush_h = (h / (flush_period + block_batch as u32 + 1) + 1) * flush_period;
                             async move {
-                                if h > chain_h {
+                                if h > chain_h { // If we are padding thread, just wait on barriers
                                     let _ = barrier.wait().await;
                                     let _ = barrier.wait().await;
                                 } else {
