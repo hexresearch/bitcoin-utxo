@@ -103,7 +103,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
 
     tokio::spawn(async move {
-        sync_future.await;
+        sync_future.await.unwrap();
     });
     tokio::spawn(async move {
         days_future.await;

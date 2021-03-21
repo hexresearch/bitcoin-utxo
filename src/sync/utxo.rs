@@ -8,7 +8,7 @@ use chrono::Utc;
 use futures::sink;
 use futures::sink::Sink;
 use futures::stream;
-use futures::stream::{Stream, StreamExt};
+use futures::stream::{Stream, TryStreamExt, StreamExt};
 use futures::Future;
 use rocksdb::DB;
 use std::sync::Arc;
@@ -28,6 +28,11 @@ use std::fmt::Debug;
 
 /// Amount of blocks to process in parallel
 pub const DEF_BLOCK_BATCH: usize = 100;
+
+#[derive(Debug)]
+pub enum UtxoSyncError {
+    BlockReq(u32, BlockHash)
+}
 
 /// Future blocks until utxo height == chain height
 pub async fn wait_utxo_sync(db: Arc<DB>, dur: Duration) {
@@ -63,7 +68,7 @@ pub async fn sync_utxo<T>(
     flush_period: u32,
     block_batch: usize,
 ) -> (
-    impl Future<Output = ()>,
+    impl Future<Output = Result<(), UtxoSyncError>>,
     impl Stream<Item = NetworkMessage> + Unpin,
     impl Sink<NetworkMessage, Error = encode::Error>,
 )
@@ -91,7 +96,7 @@ pub async fn sync_utxo_with<T, F, U>(
     block_batch: usize,
     with: F,
 ) -> (
-    impl Future<Output = ()>,
+    impl Future<Output = Result<(), UtxoSyncError>>,
     impl Stream<Item = NetworkMessage> + Unpin,
     impl Sink<NetworkMessage, Error = encode::Error>,
 )
@@ -118,8 +123,8 @@ where
                     let min_batch = utxo_h + block_batch as u32;
                     let upper_h = min_batch.max(clip_batch);
                     println!("{:?}", upper_h);
-                    stream::iter(utxo_h + 1 .. upper_h + 1)
-                        .for_each_concurrent(block_batch, |h| {
+                    stream::iter(utxo_h + 1 .. upper_h + 1).map(Ok)
+                        .try_for_each_concurrent(block_batch, |h| {
                             let db = db.clone();
                             let cache = cache.clone();
                             let broad_sender = broad_sender.clone();
@@ -139,7 +144,7 @@ where
                                             &broad_sender,
                                             &msg_sender,
                                         )
-                                        .await;
+                                        .await?;
                                     }
                                     finish_block_barrier(
                                         &db,
@@ -153,12 +158,14 @@ where
                                         barrier,
                                     )
                                     .await;
+                                    Ok::<(), UtxoSyncError>(())
                                 })
                                 .await
-                                .unwrap();
+                                .unwrap()?;
+                                Ok::<(), UtxoSyncError>(())
                             }
                         })
-                        .await;
+                        .await?;
                     println!("UTXO sync finished");
                 }
                 finish_block(
@@ -172,6 +179,7 @@ where
                     true,
                 );
                 chain_height_changes(&db, Duration::from_secs(10)).await;
+
             }
         }
     };
@@ -191,14 +199,15 @@ async fn sync_block<T, F, U>(
     mut with: F,
     broad_sender: &broadcast::Sender<NetworkMessage>,
     msg_sender: &mpsc::UnboundedSender<NetworkMessage>,
-) where
+) -> Result<(), UtxoSyncError>
+  where
     T: UtxoState + Decodable + Encodable + Clone + Debug,
     F: FnMut(u32, &Block) -> U,
     U: Future<Output = ()>,
 {
     let hash = get_block_hash(&db, h).unwrap();
     // println!("Requesting block {:?} and hash {:?}", h, hash);
-    let block = request_block(&hash, broad_sender, msg_sender).await;
+    let block = request_block(h, &hash, broad_sender, msg_sender).await?;
     let now = Utc::now().format("%Y-%m-%d %H:%M:%S");
     let progress = 100.0 * h as f32 / maxh as f32;
     println!("{}: UTXO processing block {:?} ({:.2}%)", now, h, progress);
@@ -209,16 +218,18 @@ async fn sync_block<T, F, U>(
     for tx in block.txdata {
         update_utxo_inputs(&db, &cache, h, &tx);
     }
+    Ok(())
 }
 
 /// Ask node about block and wait for reply.
 async fn request_block(
+    h: u32,
     hash: &BlockHash,
     broad_sender: &broadcast::Sender<NetworkMessage>,
     msg_sender: &mpsc::UnboundedSender<NetworkMessage>,
-) -> Block {
+) -> Result<Block, UtxoSyncError> {
     let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
-    msg_sender.send(block_msg).unwrap_or_else(|e| { println!("Error when requesting block: {:?}", e); });
+    msg_sender.send(block_msg).map_err(|e| { println!("Error when requesting block at height {:?}: {:?}", h, e); UtxoSyncError::BlockReq(h, *hash)})?;
     let mut receiver = broad_sender.subscribe();
     let mut block = None;
     while block == None {
@@ -228,12 +239,12 @@ async fn request_block(
             _ = &mut resend_future => {
                 println!("Resend request for block {:?}", hash);
                 let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
-                msg_sender.send(block_msg).unwrap_or_else(|e| { println!("Error when requesting block: {:?}", e); });
+                msg_sender.send(block_msg).map_err(|e| { println!("Error when rerequesting block at height {:?}: {:?}", h, e); UtxoSyncError::BlockReq(h, *hash)})?;
             }
             emsg = receiver.recv() => match emsg {
                 Err(broadcast::error::RecvError::Lagged(_)) => {
                     let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
-                    msg_sender.send(block_msg).unwrap_or_else(|e| { println!("Error when requesting block: {:?}", e); });
+                    msg_sender.send(block_msg).map_err(|e| { println!("Error when rerequesting block at height {:?}: {:?}", h, e); UtxoSyncError::BlockReq(h, *hash)})?;
                 }
                 Err(e) => {
                     eprintln!("Request block {:?} failed with recv error: {:?}", hash, e);
@@ -248,7 +259,7 @@ async fn request_block(
             }
         }
     }
-    block.unwrap()
+    Ok(block.unwrap())
 }
 
 async fn wait_handshake(broad_sender: &broadcast::Sender<NetworkMessage>) {
