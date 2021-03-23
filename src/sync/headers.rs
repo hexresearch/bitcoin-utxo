@@ -37,7 +37,7 @@ pub async fn sync_headers(
                 message::NetworkMessage::Verack => {
                     ask_headers(&db, &sender).await;
                 }
-                message::NetworkMessage::Headers(headers) => {
+                message::NetworkMessage::Headers(headers) if headers.len() > 0 => {
                     println!("Got {:?} headers", headers.len());
                     update_chain(&db, &headers);
                     if headers.len() < 2000 {
@@ -79,7 +79,7 @@ pub async fn sync_headers(
         let synced = synced_fut.clone();
         async move {
             loop {
-                tokio::time::sleep(Duration::from_secs(5*60)).await;
+                tokio::time::sleep(Duration::from_secs(60)).await;
                 let is_synced: bool = *synced.lock().unwrap();
                 if is_synced {
                     ask_headers(&db, &sender).await;
