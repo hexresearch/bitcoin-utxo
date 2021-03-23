@@ -112,8 +112,9 @@ where
         let broad_sender = broad_sender.clone();
         async move {
             wait_handshake(&broad_sender).await;
+            let mut last_sync_height = 0;
             loop {
-                let utxo_h = utxo_height(&db);
+                let utxo_h = utxo_height(&db).max(last_sync_height);
                 let chain_h = get_chain_height(&db);
                 let barrier = Arc::new(Barrier::new(block_batch));
                 println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
@@ -166,6 +167,7 @@ where
                         })
                         .await?;
                     println!("UTXO sync finished");
+                    last_sync_height = chain_h;
                 }
                 finish_block(
                     &db,
