@@ -38,7 +38,7 @@ pub async fn connect(
         stream::once(async { build_version_message(addr, user_agent, start_height) });
     pin_mut!(handshake_stream);
 
-    let (verack_stream, verack_sink) = process_messages(|sender, msg| async move {
+    let (_, verack_stream, verack_sink) = process_messages(|sender, msg| async move {
         match msg {
             NetworkMessage::Version(_) => {
                 println!("Received version message: {:?}", msg);

@@ -23,7 +23,7 @@ pub async fn sync_headers(
     impl Sink<NetworkMessage, Error = encode::Error>,
 ) {
     let synced = Arc::new(Mutex::new(false));
-    process_messages(move |sender, msg| {
+    let (sender, msg_stream, msg_sink) = process_messages(move |sender, msg| {
         let db = db.clone();
         let synced = synced.clone();
         async move {
@@ -40,6 +40,8 @@ pub async fn sync_headers(
                         *s = true;
                     } else {
                         ask_headers(&db, &sender).await;
+                        let mut s = synced.lock().unwrap();
+                        *s = false;
                     }
                 }
                 message::NetworkMessage::Inv(invs) => {
@@ -65,7 +67,8 @@ pub async fn sync_headers(
             }
             sender
         }
-    })
+    });
+    (msg_stream, msg_sink)
 }
 
 async fn ask_headers(db: &Arc<DB>, sender: &mpsc::Sender<NetworkMessage>) {
