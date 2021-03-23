@@ -1,16 +1,19 @@
+use bitcoin::BlockHash;
 use bitcoin::consensus::encode;
-use bitcoin::network::message;
-use bitcoin::network::message::NetworkMessage;
 use bitcoin::network::message_blockdata;
 use bitcoin::network::message_blockdata::Inventory;
-use bitcoin::BlockHash;
+use bitcoin::network::message;
+use bitcoin::network::message::NetworkMessage;
+use futures::future::Future;
 use futures::sink::Sink;
 use futures::stream;
 use futures::stream::{Stream, StreamExt};
 use rocksdb::DB;
+use std::error::Error;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+use tokio::time::Duration;
 
 use crate::connection::message::process_messages;
 use crate::storage::chain::{get_block_locator, get_chain_height, update_chain};
@@ -19,10 +22,13 @@ use crate::storage::chain::{get_block_locator, get_chain_height, update_chain};
 pub async fn sync_headers(
     db: Arc<DB>,
 ) -> (
+    impl Future<Output = Result<(), Box<dyn Error>>>,
     impl Stream<Item = NetworkMessage> + Unpin,
     impl Sink<NetworkMessage, Error = encode::Error>,
 ) {
     let synced = Arc::new(Mutex::new(false));
+    let db_fut = db.clone();
+    let synced_fut = synced.clone();
     let (sender, msg_stream, msg_sink) = process_messages(move |sender, msg| {
         let db = db.clone();
         let synced = synced.clone();
@@ -68,7 +74,20 @@ pub async fn sync_headers(
             sender
         }
     });
-    (msg_stream, msg_sink)
+    let request_future = {
+        let db = db_fut.clone();
+        let synced = synced_fut.clone();
+        async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                let is_synced: bool = *synced.lock().unwrap();
+                if is_synced {
+                    ask_headers(&db, &sender).await;
+                }
+            }
+        }
+    };
+    (request_future, msg_stream, msg_sink)
 }
 
 async fn ask_headers(db: &Arc<DB>, sender: &mpsc::Sender<NetworkMessage>) {

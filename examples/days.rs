@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // overwite_chain_height(&db, 673837);
 
-    let (headers_stream, headers_sink) = sync_headers(db.clone()).await;
+    let (headers_future, headers_stream, headers_sink) = sync_headers(db.clone()).await;
     pin_mut!(headers_sink);
     let (sync_future, utxo_stream, utxo_sink) = sync_utxo(
         db.clone(),
@@ -102,6 +102,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         msg_sink,
     );
 
+    tokio::spawn(async move {
+        headers_future.await.unwrap();
+    });
     tokio::spawn(async move {
         sync_future.await.unwrap();
     });

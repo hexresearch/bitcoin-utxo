@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let cache = Arc::new(new_cache::<FilterCoin>());
 
     loop {
-        let (headers_stream, headers_sink) = sync_headers(db.clone()).await;
+        let (headers_future, headers_stream, headers_sink) = sync_headers(db.clone()).await;
         pin_mut!(headers_sink);
         let db = db.clone();
         let cache = cache.clone();
@@ -113,11 +113,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await;
         pin_mut!(utxo_sink);
 
-        let (abort_handle, abort_registration) = AbortHandle::new_pair();
+        let (abort_utxo_handle, abort_utxo_registration) = AbortHandle::new_pair();
         tokio::spawn(async move {
-            let res = Abortable::new(sync_future, abort_registration).await;
+            let res = Abortable::new(sync_future, abort_utxo_registration).await;
             match res {
                 Err(Aborted) => eprintln!("Sync task was aborted!"),
+                _ => (),
+            }
+        });
+
+        let (abort_headers_handle, abort_headers_registration) = AbortHandle::new_pair();
+        tokio::spawn(async move {
+            let res = Abortable::new(headers_future, abort_headers_registration).await;
+            match res {
+                Err(Aborted) => eprintln!("Headers task was aborted!"),
                 _ => (),
             }
         });
@@ -138,7 +147,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         match res {
             Err(err) => {
-                abort_handle.abort();
+                abort_headers_handle.abort();
+                abort_utxo_handle.abort();
                 eprintln!("Connection closed: {:?}. Reconnecting...", err);
                 tokio::time::sleep(Duration::from_secs(3)).await;
             }

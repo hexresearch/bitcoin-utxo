@@ -122,7 +122,6 @@ where
                     let clip_batch = (((chain_h as f32) / (block_batch as f32)).ceil() * block_batch as f32) as u32;
                     let min_batch = utxo_h + block_batch as u32;
                     let upper_h = min_batch.max(clip_batch);
-                    println!("{:?}", upper_h);
                     stream::iter(utxo_h + 1 .. upper_h + 1).map(Ok)
                         .try_for_each_concurrent(block_batch, |h| {
                             let db = db.clone();
