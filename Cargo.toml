@@ -14,10 +14,14 @@ byte-strings = "^0.1"
 byteorder = "1"
 bytes = "1"
 chrono = "^0.4"
-dashmap = "^4.0"
+dashmap = "4.0"
 futures = "0.3"
+rayon = "1.5.0"
 rocksdb = "0.15.0"
+time = "0.2.26"
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
 tokio-util = { version = "^0.6", features = [ "codec" ] }
-hex = "0.4"
+
+[dev-dependencies]
+hex = "0.4.3"

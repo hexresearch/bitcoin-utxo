@@ -5,12 +5,14 @@ use dashmap::DashMap;
 use dashmap::iter::Iter;
 use dashmap::mapref::one::Ref;
 use dashmap::mapref::multiple::RefMulti;
-use futures::stream::{self, StreamExt};
 use rocksdb::{WriteBatch, DB};
 use std::collections::hash_map::RandomState;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Barrier;
 use tokio::time::{sleep, Duration};
+use rayon::prelude::*;
+use time::Instant;
 
 use crate::storage::scheme::utxo_famiy;
 use crate::storage::utxo::*;
@@ -22,10 +24,6 @@ pub const UTXO_FORK_MAX_DEPTH: u32 = 100;
 pub const UTXO_FLUSH_PERIOD: u32 = 15000;
 /// Dump UTXO if we get more than given amount of coins to save memory
 pub const UTXO_CACHE_MAX_COINS: usize = 17_000_000;
-/// Size of single chunk in coins when flushing cache
-pub const CACHE_CHUNK_SIZE: usize = UTXO_CACHE_MAX_COINS / CACHE_CHUNKS;
-/// Amount of concurrent chunks when flushing cache
-pub const CACHE_CHUNKS: usize = 32;
 
 /// Cache of UTXO coins with T payload. We keep unrollbackable UTXO set in database
 /// and the most recent UTXO set in memory.
@@ -210,61 +208,49 @@ pub async fn flush_utxo<T: 'static + Encodable + Clone + Send + Sync>(
     h: u32,
     flush_pure: bool,
 ) {
-    let ks : Arc<DashMap<OutPoint, Option<CoinChange<T>>>> = Arc::new(DashMap::new());
+    let mut ks : HashMap<OutPoint, Option<CoinChange<T>>> = HashMap::new();
     let batch = Arc::new(Mutex::new(WriteBatch::default()));
-    println!("Concurrently choose coins to dump");
+    let start = Instant::now();
+    println!("Choose which coins to dump");
 
-    stream::iter(cache.iter()).chunks(CACHE_CHUNK_SIZE).for_each_concurrent(CACHE_CHUNKS, |rs| {
-        let ks = ks.clone();
-        let batch = batch.clone();
-        let db = db.clone();
-        async move {
-            tokio::spawn(async move {
-                for r in rs {
-                    let k = r.key();
-                    match r.value() {
-                        CoinChange::Add(t, add_h) if *add_h <= h => {
-                            if *add_h >= oldest_pure {
-                                ks.insert(*k, Some(CoinChange::Pure(t.clone(), *add_h)));
-                            }
-                            let mut batch = batch.lock().unwrap();
-                            utxo_store_insert(&db, &mut batch, k, &t);
-                        }
-                        CoinChange::Remove(t, add_h, del_h)
-                        if *add_h <= h && *del_h > h && *add_h != *del_h =>
-                        {
-                            ks.insert(*k, Some(CoinChange::Remove(t.clone(), *add_h, *del_h)));
-                            let mut batch = batch.lock().unwrap();
-                            utxo_store_insert(&db, &mut batch, k, &t);
-                        }
-                        CoinChange::Remove(_, _, del_h) if *del_h <= h => {
-                            ks.insert(*k, None);
-                            let mut batch = batch.lock().unwrap();
-                            utxo_store_delete(&db, &mut batch, k);
-                        }
-                        CoinChange::Pure(_, touch_h) if flush_pure && *touch_h < oldest_pure => {
-                            ks.insert(*k, None);
-                        }
-                        _ => (),
-                    }
+    for r in cache.iter() {
+        let k = r.key();
+        match r.value() {
+            CoinChange::Add(t, add_h) if *add_h <= h => {
+                if *add_h >= oldest_pure {
+                    ks.insert(*k, Some(CoinChange::Pure(t.clone(), *add_h)));
                 }
-            }).await;
-        }
-    }).await;
-
-    println!("Concurrently cleaning cache");
-    stream::iter(ks.iter()).chunks(CACHE_CHUNK_SIZE).for_each_concurrent(CACHE_CHUNKS, |rs| {
-        let cache = cache.clone();
-        async move {
-            for r in rs {
-                if let Some(t) = r.value() {
-                    cache.insert(*r.key(), t.clone());
-                } else {
-                    cache.remove(r.key());
-                }
+                let mut batch = batch.lock().unwrap();
+                utxo_store_insert(&db, &mut batch, k, &t);
             }
+            CoinChange::Remove(t, add_h, del_h)
+            if *add_h <= h && *del_h > h && *add_h != *del_h =>
+            {
+                ks.insert(*k, Some(CoinChange::Remove(t.clone(), *add_h, *del_h)));
+                let mut batch = batch.lock().unwrap();
+                utxo_store_insert(&db, &mut batch, &k, &t);
+            }
+            CoinChange::Remove(_, _, del_h) if *del_h <= h => {
+                ks.insert(*k, None);
+                let mut batch = batch.lock().unwrap();
+                utxo_store_delete(&db, &mut batch, &k);
+            }
+            CoinChange::Pure(_, touch_h) if flush_pure && *touch_h < oldest_pure => {
+                ks.insert(*k, None);
+            }
+            _ => (),
         }
-    }).await;
+    }
+
+    println!("Cleaning cache");
+    ks.par_iter().for_each(|(k, v)| {
+        if let Some(t) = v {
+            cache.insert(*k, t.clone());
+        } else {
+            cache.remove(k);
+        }
+    });
+    println!("Required {} seconds for cache traversal.", start.elapsed().as_seconds_f32());
 
     let mut batch = Arc::try_unwrap(batch).unwrap_or_else(|_| panic!("Impossible!")).into_inner().unwrap();
     set_utxo_height(&mut batch, utxo_famiy(&db), h);
