@@ -1,11 +1,14 @@
 use bitcoin::blockdata::block::BlockHeader;
 use bitcoin::blockdata::transaction::{OutPoint, Transaction};
 use bitcoin::consensus::encode::{Decodable, Encodable};
-use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
+use dashmap::iter::Iter;
+use dashmap::mapref::one::Ref;
+use dashmap::mapref::multiple::RefMulti;
+use futures::stream::{self, StreamExt};
 use rocksdb::{WriteBatch, DB};
 use std::collections::hash_map::RandomState;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::Barrier;
 use tokio::time::{sleep, Duration};
 
@@ -19,10 +22,18 @@ pub const UTXO_FORK_MAX_DEPTH: u32 = 100;
 pub const UTXO_FLUSH_PERIOD: u32 = 15000;
 /// Dump UTXO if we get more than given amount of coins to save memory
 pub const UTXO_CACHE_MAX_COINS: usize = 17_000_000;
+/// Size of single chunk in coins when flushing cache
+pub const CACHE_CHUNK_SIZE: usize = UTXO_CACHE_MAX_COINS / CACHE_CHUNKS;
+/// Amount of concurrent chunks when flushing cache
+pub const CACHE_CHUNKS: usize = 32;
 
 /// Cache of UTXO coins with T payload. We keep unrollbackable UTXO set in database
 /// and the most recent UTXO set in memory.
 pub type UtxoCache<T> = DashMap<UtxoKey, CoinChange<T>, RandomState>;
+
+pub type UtxoIterator<'a, T> = Iter<'a, UtxoKey, CoinChange<T>, RandomState, UtxoCache<T>>;
+
+pub type UtxoRef<'a, T> = RefMulti<'a, UtxoKey, CoinChange<T>, RandomState>;
 
 pub fn new_cache<T>() -> UtxoCache<T> {
     DashMap::new()
@@ -122,9 +133,9 @@ fn add_utxo<T>(cache: &UtxoCache<T>, h: u32, k: &UtxoKey, t: T) {
 }
 
 /// Flush UTXO to database if UTXO changes are old enough to avoid forks.
-pub fn finish_block<T: Encodable + Clone>(
-    db: &DB,
-    cache: &UtxoCache<T>,
+pub async fn finish_block<T: 'static + Encodable + Clone + Send + Sync>(
+    db: Arc<DB>,
+    cache: Arc<UtxoCache<T>>,
     fork_height: u32,
     max_coins: usize,
     flush_period: u32,
@@ -135,7 +146,7 @@ pub fn finish_block<T: Encodable + Clone>(
     let coins = cache.len();
     if force && h > fork_height {
         println!("Writing UTXO to disk...");
-        flush_utxo(db, cache, h - flush_period / 2, h - fork_height, coins > max_coins);
+        flush_utxo(db, cache, h - flush_period / 2, h - fork_height, coins > max_coins).await;
         println!("Writing UTXO to disk is done");
     } else if h > fork_height && (h >= flush_height || coins > max_coins) {
         println!("UTXO cache size is {:?} coins", coins);
@@ -146,15 +157,15 @@ pub fn finish_block<T: Encodable + Clone>(
             h - flush_period / 2,
             h - fork_height,
             coins > max_coins,
-        );
+        ).await;
         println!("Writing UTXO to disk is done");
     }
 }
 
 /// Flush UTXO to database if UTXO changes are old enough to avoid forks.
-pub async fn finish_block_barrier<T: Encodable + Clone>(
-    db: &DB,
-    cache: &UtxoCache<T>,
+pub async fn finish_block_barrier<T: 'static + Encodable + Clone + Send + Sync>(
+    db: Arc<DB>,
+    cache: Arc<UtxoCache<T>>,
     fork_height: u32,
     max_coins: usize,
     flush_period: u32,
@@ -168,7 +179,7 @@ pub async fn finish_block_barrier<T: Encodable + Clone>(
         let res = barrier.wait().await;
         if res.is_leader() {
             println!("Writing UTXO to disk...");
-            flush_utxo(db, cache, h - flush_period / 2, h - fork_height, coins > max_coins);
+            flush_utxo(db, cache, h - flush_period / 2, h - fork_height, coins > max_coins).await;
             println!("Writing UTXO to disk is done");
         }
         let _ = barrier.wait().await;
@@ -184,7 +195,7 @@ pub async fn finish_block_barrier<T: Encodable + Clone>(
                 h - flush_period / 2,
                 h - fork_height,
                 coins > max_coins,
-            );
+            ).await;
             println!("Writing UTXO to disk is done");
         }
         let _ = barrier.wait().await;
@@ -192,50 +203,73 @@ pub async fn finish_block_barrier<T: Encodable + Clone>(
 }
 
 /// Flush all UTXO changes to database if change older or equal than given height.
-pub fn flush_utxo<T: Encodable + Clone>(
-    db: &DB,
-    cache: &UtxoCache<T>,
+pub async fn flush_utxo<T: 'static + Encodable + Clone + Send + Sync>(
+    db: Arc<DB>,
+    cache: Arc<UtxoCache<T>>,
     oldest_pure: u32,
     h: u32,
     flush_pure: bool,
 ) {
-    let mut ks = vec![];
-    let mut batch = WriteBatch::default();
-    for r in cache {
-        let k = r.key();
-        match r.value() {
-            CoinChange::Add(t, add_h) if *add_h <= h => {
-                if *add_h >= oldest_pure {
-                    ks.push((*k, Some(CoinChange::Pure(t.clone(), *add_h))));
+    let ks : Arc<DashMap<OutPoint, Option<CoinChange<T>>>> = Arc::new(DashMap::new());
+    let batch = Arc::new(Mutex::new(WriteBatch::default()));
+    println!("Concurrently choose coins to dump");
+
+    stream::iter(cache.iter()).chunks(CACHE_CHUNK_SIZE).for_each_concurrent(CACHE_CHUNKS, |rs| {
+        let ks = ks.clone();
+        let batch = batch.clone();
+        let db = db.clone();
+        async move {
+            tokio::spawn(async move {
+                for r in rs {
+                    let k = r.key();
+                    match r.value() {
+                        CoinChange::Add(t, add_h) if *add_h <= h => {
+                            if *add_h >= oldest_pure {
+                                ks.insert(*k, Some(CoinChange::Pure(t.clone(), *add_h)));
+                            }
+                            let mut batch = batch.lock().unwrap();
+                            utxo_store_insert(&db, &mut batch, k, &t);
+                        }
+                        CoinChange::Remove(t, add_h, del_h)
+                        if *add_h <= h && *del_h > h && *add_h != *del_h =>
+                        {
+                            ks.insert(*k, Some(CoinChange::Remove(t.clone(), *add_h, *del_h)));
+                            let mut batch = batch.lock().unwrap();
+                            utxo_store_insert(&db, &mut batch, k, &t);
+                        }
+                        CoinChange::Remove(_, _, del_h) if *del_h <= h => {
+                            ks.insert(*k, None);
+                            let mut batch = batch.lock().unwrap();
+                            utxo_store_delete(&db, &mut batch, k);
+                        }
+                        CoinChange::Pure(_, touch_h) if flush_pure && *touch_h < oldest_pure => {
+                            ks.insert(*k, None);
+                        }
+                        _ => (),
+                    }
                 }
-                utxo_store_insert(db, &mut batch, k, &t);
-            }
-            CoinChange::Remove(t, add_h, del_h)
-                if *add_h <= h && *del_h > h && *add_h != *del_h =>
-            {
-                ks.push((*k, Some(CoinChange::Remove(t.clone(), *add_h, *del_h))));
-                utxo_store_insert(db, &mut batch, k, &t);
-            }
-            CoinChange::Remove(_, _, del_h) if *del_h <= h => {
-                ks.push((*k, None));
-                utxo_store_delete(db, &mut batch, k);
-            }
-            CoinChange::Pure(_, touch_h) if flush_pure && *touch_h < oldest_pure => {
-                ks.push((*k, None));
-            }
-            _ => (),
+            }).await;
         }
-    }
-    let cf = utxo_famiy(db);
-    set_utxo_height(&mut batch, cf, h);
+    }).await;
+
+    println!("Concurrently cleaning cache");
+    stream::iter(ks.iter()).chunks(CACHE_CHUNK_SIZE).for_each_concurrent(CACHE_CHUNKS, |rs| {
+        let cache = cache.clone();
+        async move {
+            for r in rs {
+                if let Some(t) = r.value() {
+                    cache.insert(*r.key(), t.clone());
+                } else {
+                    cache.remove(r.key());
+                }
+            }
+        }
+    }).await;
+
+    let mut batch = Arc::try_unwrap(batch).unwrap_or_else(|_| panic!("Impossible!")).into_inner().unwrap();
+    set_utxo_height(&mut batch, utxo_famiy(&db), h);
+    println!("Writing to disk");
     db.write(batch).unwrap();
-    for (k, mval) in ks.iter() {
-        if let Some(t) = mval {
-            cache.insert(*k, t.clone());
-        } else {
-            cache.remove(k);
-        }
-    }
 }
 
 /// Get UTXO coin from cache and if not found, load it from disk.

@@ -133,32 +133,35 @@ where
                             let barrier = barrier.clone();
                             let flush_h = utxo_height(&db) + flush_period;
                             async move {
-                                tokio::spawn(async move {
-                                    if h <= chain_h { // If we are padding thread, just wait on barriers
-                                        sync_block(
-                                            db.clone(),
+                                tokio::spawn({
+                                    let cache = cache.clone();
+                                    async move {
+                                        if h <= chain_h { // If we are padding thread, just wait on barriers
+                                            sync_block(
+                                                db.clone(),
+                                                cache.clone(),
+                                                h,
+                                                chain_h,
+                                                with,
+                                                &broad_sender,
+                                                &msg_sender,
+                                            )
+                                            .await?;
+                                        }
+                                        finish_block_barrier(
+                                            db,
                                             cache.clone(),
+                                            fork_height,
+                                            max_coins,
+                                            flush_period,
+                                            flush_h,
                                             h,
-                                            chain_h,
-                                            with,
-                                            &broad_sender,
-                                            &msg_sender,
+                                            false,
+                                            barrier,
                                         )
-                                        .await?;
+                                        .await;
+                                        Ok::<(), UtxoSyncError>(())
                                     }
-                                    finish_block_barrier(
-                                        &db,
-                                        &cache,
-                                        fork_height,
-                                        max_coins,
-                                        flush_period,
-                                        flush_h,
-                                        h,
-                                        false,
-                                        barrier,
-                                    )
-                                    .await;
-                                    Ok::<(), UtxoSyncError>(())
                                 })
                                 .await
                                 .unwrap()?;
@@ -170,15 +173,15 @@ where
                     last_sync_height = chain_h;
                 }
                 finish_block(
-                    &db,
-                    &cache,
+                    db.clone(),
+                    cache.clone(),
                     fork_height,
                     max_coins,
                     flush_period,
                     chain_h,
                     chain_h,
                     true,
-                );
+                ).await;
                 chain_height_changes(&db, Duration::from_secs(10)).await;
 
             }
