@@ -12,6 +12,7 @@ use futures::stream::{Stream, TryStreamExt, StreamExt};
 use futures::Future;
 use rocksdb::DB;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
@@ -123,6 +124,7 @@ where
                     let clip_batch = (((chain_h as f32) / (block_batch as f32)).ceil() * block_batch as f32) as u32;
                     let min_batch = utxo_h + block_batch as u32;
                     let upper_h = min_batch.max(clip_batch);
+                    let current_utxo_h = Arc::new(AtomicU32::new(utxo_h));
                     stream::iter(utxo_h + 1 .. upper_h + 1).map(Ok)
                         .try_for_each_concurrent(block_batch, |h| {
                             let db = db.clone();
@@ -131,7 +133,8 @@ where
                             let msg_sender = msg_sender.clone();
                             let with = with.clone();
                             let barrier = barrier.clone();
-                            let flush_h = utxo_height(&db) + flush_period;
+                            let flush_h = current_utxo_h.load(Ordering::Relaxed) + flush_period;
+                            let current_utxo_h = current_utxo_h.clone();
                             async move {
                                 tokio::spawn({
                                     let cache = cache.clone();
@@ -151,6 +154,7 @@ where
                                         finish_block_barrier(
                                             db,
                                             cache.clone(),
+                                            current_utxo_h,
                                             fork_height,
                                             max_coins,
                                             flush_period,

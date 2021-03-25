@@ -102,6 +102,7 @@ dependencies = [
  "chrono",
  "dashmap",
  "futures",
+ "hex",
  "rayon",
  "rocksdb",
  "time 0.2.26",
@@ -437,6 +438,12 @@ checksum = "322f4de77956e22ed0e5032c359a0f1273f1f7f0d79bfa3b8ffbc730d7fbcc5c"
 dependencies = [
  "libc",
 ]
+
+[[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "humantime"

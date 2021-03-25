@@ -9,6 +9,7 @@ use rocksdb::{WriteBatch, DB};
 use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::Barrier;
 use tokio::time::{sleep, Duration};
 use rayon::prelude::*;
@@ -164,6 +165,7 @@ pub async fn finish_block<T: 'static + Encodable + Clone + Send + Sync>(
 pub async fn finish_block_barrier<T: 'static + Encodable + Clone + Send + Sync>(
     db: Arc<DB>,
     cache: Arc<UtxoCache<T>>,
+    current_height: Arc<AtomicU32>,
     fork_height: u32,
     max_coins: usize,
     flush_period: u32,
@@ -177,7 +179,9 @@ pub async fn finish_block_barrier<T: 'static + Encodable + Clone + Send + Sync>(
         let res = barrier.wait().await;
         if res.is_leader() {
             println!("Writing UTXO to disk...");
-            flush_utxo(db, cache, h - flush_period / 2, h - fork_height, coins > max_coins).await;
+            let new_height = h - fork_height;
+            flush_utxo(db, cache, h - flush_period / 2, new_height, coins > max_coins).await;
+            current_height.store(new_height, Ordering::SeqCst);
             println!("Writing UTXO to disk is done");
         }
         let _ = barrier.wait().await;
@@ -187,13 +191,15 @@ pub async fn finish_block_barrier<T: 'static + Encodable + Clone + Send + Sync>(
             println!("UTXO cache size is {:?} coins", coins);
             println!("Writing UTXO to disk...");
             println!("H is {:?} and flush height is {:?}", h, flush_height);
+            let new_height = h - fork_height;
             flush_utxo(
                 db,
                 cache,
                 h - flush_period / 2,
-                h - fork_height,
+                new_height,
                 coins > max_coins,
             ).await;
+            current_height.store(new_height, Ordering::SeqCst);
             println!("Writing UTXO to disk is done");
         }
         let _ = barrier.wait().await;
