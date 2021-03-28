@@ -186,7 +186,7 @@ where
                     chain_h,
                     true,
                 ).await;
-                chain_height_changes(&db, Duration::from_secs(10)).await;
+                chain_height_changes(&db, chain_h, Duration::from_secs(10)).await;
 
             }
         }

@@ -64,10 +64,9 @@ pub fn overwite_chain_height(db: &DB, h: u32) {
 }
 
 /// Makes futures that polls chain height and finishes when it is changed
-pub async fn chain_height_changes(db: &DB, dur: Duration) {
-    let starth = chain_height(db, chain_famiy(db));
-    let mut curh = starth;
-    while curh == starth {
+pub async fn chain_height_changes(db: &DB, last_h: u32, dur: Duration) {
+    let mut curh = last_h;
+    while curh == last_h {
         sleep(dur).await;
         curh = chain_height(db, chain_famiy(db));
     }
