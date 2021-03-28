@@ -37,17 +37,22 @@ pub async fn sync_headers(
                 message::NetworkMessage::Verack => {
                     ask_headers(&db, &sender).await;
                 }
-                message::NetworkMessage::Headers(headers) if headers.len() > 0 => {
-                    println!("Got {:?} headers", headers.len());
-                    update_chain(&db, &headers);
-                    if headers.len() < 2000 {
-                        println!("Synced all headers");
+                message::NetworkMessage::Headers(headers) => {
+                    if headers.len() > 0 {
+                        println!("Got {:?} headers", headers.len());
+                        update_chain(&db, &headers);
+                        if headers.len() < 2000 {
+                            println!("Synced all headers");
+                            let mut s = synced.lock().unwrap();
+                            *s = true;
+                        } else {
+                            ask_headers(&db, &sender).await;
+                            let mut s = synced.lock().unwrap();
+                            *s = false;
+                        }
+                    } else {
                         let mut s = synced.lock().unwrap();
                         *s = true;
-                    } else {
-                        ask_headers(&db, &sender).await;
-                        let mut s = synced.lock().unwrap();
-                        *s = false;
                     }
                 }
                 message::NetworkMessage::Inv(invs) => {
@@ -82,6 +87,7 @@ pub async fn sync_headers(
                 tokio::time::sleep(Duration::from_secs(60)).await;
                 let is_synced: bool = *synced.lock().unwrap();
                 if is_synced {
+                    println!("Requested new headers");
                     ask_headers(&db, &sender).await;
                 }
             }
