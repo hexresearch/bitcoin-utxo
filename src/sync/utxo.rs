@@ -112,6 +112,7 @@ where
     let sync_future = {
         let broad_sender = broad_sender.clone();
         async move {
+            println!("Waiting handshake with node");
             wait_handshake(&broad_sender).await;
             let mut last_sync_height = 0;
             loop {
@@ -125,6 +126,10 @@ where
                     let min_batch = utxo_h + block_batch as u32;
                     let upper_h = min_batch.max(clip_batch);
                     let current_utxo_h = Arc::new(AtomicU32::new(utxo_h));
+                    println!("clip_batch = {:?}", clip_batch);
+                    println!("min_batch = {:?}", min_batch);
+                    println!("upper_h = {:?}", upper_h);
+                    println!("utxo_h = {:?}", utxo_h);
                     stream::iter(utxo_h + 1 .. upper_h + 1).map(Ok)
                         .try_for_each_concurrent(block_batch, |h| {
                             let db = db.clone();
@@ -186,8 +191,8 @@ where
                     chain_h,
                     true,
                 ).await;
+                println!("Waiting new height after {}", chain_h);
                 chain_height_changes(&db, chain_h, Duration::from_secs(10)).await;
-
             }
         }
     };
