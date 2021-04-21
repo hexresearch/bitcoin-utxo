@@ -122,7 +122,7 @@ where
                 println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
                 if chain_h > utxo_h {
                     // We should add padding futures at end of sync to successfully finish sync
-                    let clip_batch = (((chain_h as f32) / (block_batch as f32)).ceil() * block_batch as f32) as u32;
+                    let clip_batch = utxo_h + ((((chain_h - utxo_h) as f32) / (block_batch as f32)).ceil() * block_batch as f32) as u32;
                     let min_batch = utxo_h + block_batch as u32;
                     let upper_h = min_batch.max(clip_batch);
                     let current_utxo_h = Arc::new(AtomicU32::new(utxo_h));
