@@ -130,7 +130,7 @@ where
                     println!("min_batch = {:?}", min_batch);
                     println!("upper_h = {:?}", upper_h);
                     println!("utxo_h = {:?}", utxo_h);
-                    stream::iter(utxo_h + 1 .. upper_h + 1).map(Ok)
+                    stream::iter(utxo_h + 1 .. upper_h).map(Ok)
                         .try_for_each_concurrent(block_batch, |h| {
                             let db = db.clone();
                             let cache = cache.clone();
