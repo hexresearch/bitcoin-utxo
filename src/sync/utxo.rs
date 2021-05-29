@@ -16,7 +16,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
-use tokio::sync::Barrier;
 use tokio::time::{sleep, Duration};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -24,6 +23,7 @@ use crate::cache::utxo::*;
 use crate::storage::chain::*;
 use crate::storage::utxo::utxo_height;
 use crate::utxo::UtxoState;
+use super::barrier::FlushBarrier;
 
 use std::fmt::Debug;
 
@@ -118,19 +118,11 @@ where
             loop {
                 let utxo_h = utxo_height(&db).max(last_sync_height);
                 let chain_h = get_chain_height(&db);
-                let barrier = Arc::new(Barrier::new(block_batch));
+                let barrier = Arc::new(FlushBarrier::new(block_batch));
                 println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
                 if chain_h > utxo_h {
-                    // We should add padding futures at end of sync to successfully finish sync
-                    let clip_batch = utxo_h + ((((chain_h - utxo_h) as f32) / (block_batch as f32)).ceil() * block_batch as f32) as u32;
-                    let min_batch = utxo_h + block_batch as u32;
-                    let upper_h = min_batch.max(clip_batch);
                     let current_utxo_h = Arc::new(AtomicU32::new(utxo_h));
-                    println!("clip_batch = {:?}", clip_batch);
-                    println!("min_batch = {:?}", min_batch);
-                    println!("upper_h = {:?}", upper_h);
-                    println!("utxo_h = {:?}", utxo_h);
-                    stream::iter(utxo_h + 1 .. upper_h).map(Ok)
+                    stream::iter(utxo_h + 1 .. chain_h+1).map(Ok)
                         .try_for_each_concurrent(block_batch, |h| {
                             let db = db.clone();
                             let cache = cache.clone();
@@ -165,6 +157,7 @@ where
                                             flush_period,
                                             flush_h,
                                             h,
+                                            chain_h,
                                             false,
                                             barrier,
                                         )

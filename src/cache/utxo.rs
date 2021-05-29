@@ -10,7 +10,6 @@ use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU32, Ordering};
-use tokio::sync::Barrier;
 use tokio::time::{sleep, Duration};
 use rayon::prelude::*;
 use time::Instant;
@@ -18,6 +17,7 @@ use time::Instant;
 use crate::storage::scheme::utxo_famiy;
 use crate::storage::utxo::*;
 use crate::utxo::{UtxoKey, UtxoState};
+use crate::sync::barrier::FlushBarrier;
 
 /// Maximum fork depth after which we can flush UTXO to disk
 pub const UTXO_FORK_MAX_DEPTH: u32 = 100;
@@ -171,38 +171,43 @@ pub async fn finish_block_barrier<T: 'static + Encodable + Clone + Send + Sync>(
     flush_period: u32,
     flush_height: u32,
     h: u32,
+    chain_h: u32,
     force: bool,
-    barrier: Arc<Barrier>,
+    barrier: Arc<FlushBarrier>,
 ) {
     let coins = cache.len();
     if force && h > fork_height {
-        let res = barrier.wait().await;
-        if res.is_leader() {
-            println!("Writing UTXO to disk...");
-            let new_height = h - fork_height;
-            flush_utxo(db, cache, h - flush_period / 2, new_height, coins > max_coins).await;
-            current_height.store(new_height, Ordering::SeqCst);
-            println!("Writing UTXO to disk is done");
+        let mres = FlushBarrier::wait(barrier.clone(), h, |filled| filled >= chain_h-1).await;
+        if let Some(res) = mres {
+            if res.is_leader() {
+                println!("Writing UTXO to disk...");
+                let new_height = h - fork_height;
+                flush_utxo(db, cache, h - flush_period / 2, new_height, coins > max_coins).await;
+                current_height.store(new_height, Ordering::SeqCst);
+                println!("Writing UTXO to disk is done");
+            }
         }
-        let _ = barrier.wait().await;
+        let _ = FlushBarrier::wait(barrier, h, |filled| filled >= chain_h-1).await;
     } else if h > fork_height && (h >= flush_height || coins > max_coins) {
-        let res = barrier.wait().await;
-        if res.is_leader() {
-            println!("UTXO cache size is {:?} coins", coins);
-            println!("Writing UTXO to disk...");
-            println!("H is {:?} and flush height is {:?}", h, flush_height);
-            let new_height = h - fork_height;
-            flush_utxo(
-                db,
-                cache,
-                h - flush_period / 2,
-                new_height,
-                coins > max_coins,
-            ).await;
-            current_height.store(new_height, Ordering::SeqCst);
-            println!("Writing UTXO to disk is done");
+        let mres = FlushBarrier::wait(barrier.clone(), h, |filled| filled >= chain_h-1).await;
+        if let Some(res) = mres {
+            if res.is_leader() {
+                println!("UTXO cache size is {:?} coins", coins);
+                println!("Writing UTXO to disk...");
+                println!("H is {:?} and flush height is {:?}", h, flush_height);
+                let new_height = h - fork_height;
+                flush_utxo(
+                    db,
+                    cache,
+                    h - flush_period / 2,
+                    new_height,
+                    coins > max_coins,
+                ).await;
+                current_height.store(new_height, Ordering::SeqCst);
+                println!("Writing UTXO to disk is done");
+            }
         }
-        let _ = barrier.wait().await;
+        let _ = FlushBarrier::wait(barrier, h, |filled| filled >= chain_h-1).await;
     }
 }
 
