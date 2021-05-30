@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let cache = cache.clone();
                 async move {
                     let hash = block.block_hash();
-                    let filter = generate_filter(db.clone(), cache, h, block).await;
+                    let filter = generate_filter(db.clone(), cache, h, block).await?;
                     if h % 1000 == 0 {
                         println!(
                             "Filter for block {:?}: {:?}",
@@ -106,7 +106,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             hex::encode(&filter.content)
                         );
                     }
-                    store_filter(db, &hash, filter);
+                    store_filter(db, &hash, filter).map_err(|e| UtxoSyncError::UserWith(Box::new(e)))
                 }
             },
         )
@@ -167,7 +167,7 @@ async fn generate_filter(
     cache: Arc<UtxoCache<FilterCoin>>,
     h: u32,
     block: Block,
-) -> BlockFilter {
+) -> Result<BlockFilter, UtxoSyncError> {
     let mut hashmap = HashMap::<OutPoint, Script>::new();
     for tx in &block.txdata {
         if !tx.is_coin_base() {
@@ -179,7 +179,7 @@ async fn generate_filter(
                     h,
                     Duration::from_millis(100),
                 )
-                .await;
+                .await?;
                 hashmap.insert(i.previous_output, coin.script);
             }
         }
@@ -188,11 +188,10 @@ async fn generate_filter(
         hashmap
             .get(out)
             .map_or(Err(bip158::Error::UtxoMissing(*out)), |s| Ok(s.clone()))
-    })
-    .unwrap()
+    }).map_err(|e| UtxoSyncError::UserWith(Box::new(e)))
 }
 
-fn store_filter(db: Arc<DB>, hash: &BlockHash, filter: BlockFilter) {
+fn store_filter(db: Arc<DB>, hash: &BlockHash, filter: BlockFilter) -> Result<(), rocksdb::Error> {
     let cf = db.cf_handle("filters").unwrap();
     let mut batch = WriteBatch::default();
     batch.put_cf(cf, hash, filter.content);
@@ -200,5 +199,5 @@ fn store_filter(db: Arc<DB>, hash: &BlockHash, filter: BlockFilter) {
     let mut write_options = WriteOptions::default();
     write_options.set_sync(false);
     write_options.disable_wal(true);
-    db.write_opt(batch, &write_options).unwrap();
+    db.write_opt(batch, &write_options)
 }
