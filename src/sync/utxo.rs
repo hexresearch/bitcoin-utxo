@@ -165,14 +165,13 @@ where
                                     Ok::<(), UtxoSyncError>(())
                                 }
                             }).await?;
-                        let flush_h = start_h + flush_period;
                         finish_block(
                             db.clone(),
                             cache.clone(),
                             fork_height,
                             max_coins,
                             flush_period,
-                            flush_h,
+                            start_h,
                             end_h,
                             false,
                         )

@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use tokio::time::{sleep, Duration};
 use rayon::prelude::*;
 use time::Instant;
-
+use std::ops::Div;
 use crate::{storage::scheme::utxo_famiy, sync::utxo::UtxoSyncError};
 use crate::storage::utxo::*;
 use crate::utxo::{UtxoKey, UtxoState};
@@ -136,23 +136,23 @@ pub async fn finish_block<T: 'static + Encodable + Clone + Send + Sync>(
     fork_height: u32,
     max_coins: usize,
     flush_period: u32,
-    flush_height: u32,
-    h: u32,
+    start_h: u32,
+    end_h: u32,
     force: bool,
 ) {
     let coins = cache.len();
-    if force && h > fork_height {
+    if force && end_h > fork_height {
         println!("Writing UTXO to disk...");
-        flush_utxo(db, cache, h - flush_period / 2, h - fork_height, coins > max_coins).await;
+        flush_utxo(db, cache, end_h - flush_period / 2, end_h - fork_height, coins > max_coins).await;
         println!("Writing UTXO to disk is done");
-    } else if h > fork_height && (h >= flush_height || coins > max_coins) {
+    } else if end_h > fork_height && ((start_h.div(flush_period) != end_h.div(flush_period)) || coins > max_coins) {
         println!("UTXO cache size is {:?} coins", coins);
         println!("Writing UTXO to disk...");
         flush_utxo(
             db,
             cache,
-            h - flush_period / 2,
-            h - fork_height,
+            end_h - flush_period / 2,
+            end_h - fork_height,
             coins > max_coins,
         ).await;
         println!("Writing UTXO to disk is done");
@@ -235,6 +235,40 @@ pub fn get_utxo<'a, T: Decodable>(
                     cache.get(k)
                 }
             }
+        }
+    }
+}
+
+pub fn get_utxo_noh<'a, T:Decodable + Clone>(
+    db: &DB,
+    cache: &'a UtxoCache<T>,
+    k: &UtxoKey,
+) -> Option<T>{
+    cache.get(k)
+        .map(|cc| cc.payload().clone())
+        .or_else(|| utxo_store_read(db, k))
+}
+
+pub async fn wait_utxo_noh<T: Decodable + Clone>(
+    db: Arc<DB>,
+    cache: Arc<UtxoCache<T>>,
+    k: &UtxoKey,
+    dur: Duration,
+) -> Result<T, UtxoSyncError> {
+    let mut value = get_utxo_noh(&db, &cache, k);
+    let mut counter: u32 = 0;
+    loop {
+        match value {
+            None => {
+                // println!("Awaiting UTXO for {}", k);
+                sleep(dur).await;
+                value = get_utxo_noh(&db, &cache, k);
+                counter += 1;
+                if counter > 1000 {
+                    return Err(UtxoSyncError::CoinWaitTimeout(0, k.clone()))
+                }
+            }
+            Some(v) => return Ok(v.clone()),
         }
     }
 }
