@@ -239,40 +239,6 @@ pub fn get_utxo<'a, T: Decodable>(
     }
 }
 
-pub fn get_utxo_noh<'a, T:Decodable + Clone>(
-    db: &DB,
-    cache: &'a UtxoCache<T>,
-    k: &UtxoKey,
-) -> Option<T>{
-    cache.get(k)
-        .map(|cc| cc.payload().clone())
-        .or_else(|| utxo_store_read(db, k))
-}
-
-pub async fn wait_utxo_noh<T: Decodable + Clone>(
-    db: Arc<DB>,
-    cache: Arc<UtxoCache<T>>,
-    k: &UtxoKey,
-    dur: Duration,
-) -> Result<T, UtxoSyncError> {
-    let mut value = get_utxo_noh(&db, &cache, k);
-    let mut counter: u32 = 0;
-    loop {
-        match value {
-            None => {
-                // println!("Awaiting UTXO for {}", k);
-                sleep(dur).await;
-                value = get_utxo_noh(&db, &cache, k);
-                counter += 1;
-                if counter > 1000 {
-                    return Err(UtxoSyncError::CoinWaitTimeout(0, k.clone()))
-                }
-            }
-            Some(v) => return Ok(v.clone()),
-        }
-    }
-}
-
 /// Get UTXO coin from cache/storage and if not found, wait until it appears.
 pub async fn wait_utxo<T: Decodable + Clone>(
     db: Arc<DB>,
@@ -295,6 +261,48 @@ pub async fn wait_utxo<T: Decodable + Clone>(
                 }
             }
             Some(v) => return Ok(v.value().payload().clone()),
+        }
+    }
+}
+
+/// Get UTXO coin from cache and if not found, load it from disk.
+/// Does not ask for the height at which the coin was encountered
+/// Nor does it modify the cache
+/// Used to build mempool filters
+pub fn get_utxo_noh<'a, T:Decodable + Clone>(
+    db: &DB,
+    cache: &'a UtxoCache<T>,
+    k: &UtxoKey,
+) -> Option<T>{
+    cache.get(k)
+        .map(|cc| cc.payload().clone())
+        .or_else(|| utxo_store_read(db, k))
+}
+
+/// Get UTXO coin from cache/storage and if not found, wait until it appears.
+/// Does not ask for the height at which the coin was encountered
+/// Nor does it modify the cache
+/// Used to build mempool filters
+pub async fn wait_utxo_noh<T: Decodable + Clone>(
+    db: Arc<DB>,
+    cache: Arc<UtxoCache<T>>,
+    k: &UtxoKey,
+    dur: Duration,
+) -> Result<T, UtxoSyncError> {
+    let mut value = get_utxo_noh(&db, &cache, k);
+    let mut counter: u32 = 0;
+    loop {
+        match value {
+            None => {
+                // println!("Awaiting UTXO for {}", k);
+                sleep(dur).await;
+                value = get_utxo_noh(&db, &cache, k);
+                counter += 1;
+                if counter > 1000 {
+                    return Err(UtxoSyncError::CoinWaitTimeout(0, k.clone()))
+                }
+            }
+            Some(v) => return Ok(v.clone()),
         }
     }
 }
