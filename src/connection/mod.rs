@@ -47,6 +47,9 @@ pub async fn connect(
             }
             NetworkMessage::Verack => {
                 println!("Received verack message: {:?}", msg);
+            },
+            NetworkMessage::Ping(u) => {
+                sender.send(NetworkMessage::Pong(u)).await.unwrap();
             }
             _ => (),
         };
@@ -128,7 +131,7 @@ fn build_version_message(
     let nonce: u64 = secp256k1::rand::thread_rng().gen();
 
     // Construct the message
-    NetworkMessage::Version(VersionMessage::new(
+    let mut msg = VersionMessage::new(
         services,
         timestamp as i64,
         addr_recv,
@@ -136,5 +139,7 @@ fn build_version_message(
         nonce,
         user_agent,
         start_height,
-    ))
+    );
+    msg.relay = true;
+    NetworkMessage::Version(msg)
 }
