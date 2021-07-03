@@ -23,7 +23,7 @@ impl Default for MessageCodec {
 impl MessageCodec {
     /// Creates a new `MessageCodec` for shipping around raw bytes.
     pub fn new(network: Network) -> MessageCodec {
-        MessageCodec { network: network }
+        MessageCodec { network }
     }
 }
 
@@ -37,7 +37,7 @@ impl Decoder for MessageCodec {
                 Err(encode::Error::Io(ref err)) if err.kind() == io::ErrorKind::UnexpectedEof => {
                     Ok(None)
                 }
-                Err(err) => return Err(err),
+                Err(err) => Err(err),
                 Ok((message, index)) => {
                     let _ = buf.split_to(index);
                     Ok(Some(message.payload))

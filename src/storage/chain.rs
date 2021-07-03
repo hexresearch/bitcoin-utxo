@@ -18,8 +18,8 @@ pub fn init_chain_storage(db: &DB) {
     db.write(batch).unwrap();
 }
 
-pub fn update_chain(db: &DB, headers: &Vec<BlockHeader>) {
-    if headers.len() == 0 {
+pub fn update_chain(db: &DB, headers: &[BlockHeader]) {
+    if headers.is_empty() {
         return;
     }
     let cf = chain_famiy(db);
