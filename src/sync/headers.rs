@@ -11,12 +11,13 @@ use futures::stream::{Stream, StreamExt};
 use rocksdb::DB;
 use std::error::Error;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::Duration;
 
 use crate::connection::message::process_messages;
 use crate::storage::chain::{get_block_locator, get_chain_height, update_chain};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Request all headers from node and keep DB for main chain updated
 pub async fn sync_headers(
@@ -26,7 +27,7 @@ pub async fn sync_headers(
     impl Stream<Item = NetworkMessage> + Unpin,
     impl Sink<NetworkMessage, Error = encode::Error>,
 ) {
-    let synced = Arc::new(Mutex::new(false));
+    let synced = Arc::new(AtomicBool::new(false));
     let db_fut = db.clone();
     let synced_fut = synced.clone();
     let (sender, msg_stream, msg_sink) = process_messages(move |sender, msg| {
@@ -38,26 +39,22 @@ pub async fn sync_headers(
                     ask_headers(&db, &sender).await;
                 }
                 message::NetworkMessage::Headers(headers) => {
-                    if headers.len() > 0 {
+                    if !headers.is_empty() {
                         println!("Got {:?} headers", headers.len());
                         update_chain(&db, &headers);
                         if headers.len() < 2000 {
                             println!("Synced all headers");
-                            let mut s = synced.lock().unwrap();
-                            *s = true;
+                            synced.store(true, Ordering::AcqRel);
                         } else {
                             ask_headers(&db, &sender).await;
-                            let mut s = synced.lock().unwrap();
-                            *s = false;
+                            synced.store(false, Ordering::AcqRel);
                         }
                     } else {
-                        let mut s = synced.lock().unwrap();
-                        *s = true;
+                        synced.store(true, Ordering::AcqRel);
                     }
                 }
                 message::NetworkMessage::Inv(invs) => {
-                    let s = synced.lock().unwrap();
-                    if *s {
+                    if synced.load(Ordering::AcqRel) {
                         stream::iter(invs)
                             .for_each(|inv| {
                                 let db = db.clone();
@@ -80,15 +77,13 @@ pub async fn sync_headers(
         }
     });
     let request_future = {
-        let db = db_fut.clone();
-        let synced = synced_fut.clone();
         async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(60)).await;
-                let is_synced: bool = *synced.lock().unwrap();
-                if is_synced {
+
+                if synced_fut.load(Ordering::AcqRel) {
                     println!("Requested new headers");
-                    ask_headers(&db, &sender).await;
+                    ask_headers(&db_fut, &sender).await;
                 }
             }
         }
