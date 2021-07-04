@@ -44,17 +44,17 @@ pub async fn sync_headers(
                         update_chain(&db, &headers);
                         if headers.len() < 2000 {
                             println!("Synced all headers");
-                            synced.store(true, Ordering::AcqRel);
+                            synced.store(true, Ordering::Release);
                         } else {
                             ask_headers(&db, &sender).await;
-                            synced.store(false, Ordering::AcqRel);
+                            synced.store(false, Ordering::Release);
                         }
                     } else {
-                        synced.store(true, Ordering::AcqRel);
+                        synced.store(true, Ordering::Release);
                     }
                 }
                 message::NetworkMessage::Inv(invs) => {
-                    if synced.load(Ordering::AcqRel) {
+                    if synced.load(Ordering::Acquire) {
                         stream::iter(invs)
                             .for_each(|inv| {
                                 let db = db.clone();
@@ -81,7 +81,7 @@ pub async fn sync_headers(
             loop {
                 tokio::time::sleep(Duration::from_secs(60)).await;
 
-                if synced_fut.load(Ordering::AcqRel) {
+                if synced_fut.load(Ordering::Acquire) {
                     println!("Requested new headers");
                     ask_headers(&db_fut, &sender).await;
                 }
