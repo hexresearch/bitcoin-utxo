@@ -6,7 +6,7 @@ use tokio_stream::wrappers::ReceiverStream;
 
 /// Create a sink and a stream of messages that allows you to process message and then send another one
 /// as response.
-pub fn process_messages<'a, E, T, F, U>(
+pub fn process_messages<E, T, F, U>(
     f: F,
 ) -> (mpsc::Sender<T>, impl Stream<Item = T> + Unpin, impl Sink<T, Error = E>)
 where

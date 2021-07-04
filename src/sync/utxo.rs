@@ -267,14 +267,11 @@ async fn request_block(
 
 async fn wait_handshake(broad_sender: &broadcast::Sender<NetworkMessage>) {
     let mut receiver = broad_sender.subscribe();
-    let mut handshaked = false;
-    while !handshaked {
+    loop {
         let msg = receiver.recv().await.unwrap();
-        match msg {
-            NetworkMessage::Verack => {
-                handshaked = true;
-            }
-            _ => (),
+
+        if let NetworkMessage::Verack = msg {
+            break
         }
     }
 }

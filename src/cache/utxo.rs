@@ -257,7 +257,7 @@ pub async fn wait_utxo<T: Decodable + Clone>(
                 value = get_utxo(&db, &cache, k, h);
                 counter += 1;
                 if counter > 1000 {
-                    return Err(UtxoSyncError::CoinWaitTimeout(h, k.clone()))
+                    return Err(UtxoSyncError::CoinWaitTimeout(h, *k))
                 }
             }
             Some(v) => return Ok(v.value().payload().clone()),
@@ -299,10 +299,10 @@ pub async fn wait_utxo_noh<T: Decodable + Clone>(
                 value = get_utxo_noh(&db, &cache, k);
                 counter += 1;
                 if counter > 1000 {
-                    return Err(UtxoSyncError::CoinWaitTimeout(0, k.clone()))
+                    return Err(UtxoSyncError::CoinWaitTimeout(0, *k))
                 }
             }
-            Some(v) => return Ok(v.clone()),
+            Some(v) => return Ok(v),
         }
     }
 }

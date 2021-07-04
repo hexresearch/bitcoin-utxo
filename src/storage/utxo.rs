@@ -71,7 +71,7 @@ impl<'a, T: Decodable> Iterator for UtxoIterator<'a, T> {
 }
 
 /// Return iterator over all utxos
-pub fn utxo_iterator<'a, T: Decodable>(db: &'a DB) -> UtxoIterator<'a, T> {
+pub fn utxo_iterator<T: Decodable>(db: &DB) -> UtxoIterator<T> {
     UtxoIterator(
         db.iterator_cf(utxo_famiy(db), IteratorMode::Start),
         PhantomData,
