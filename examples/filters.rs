@@ -10,6 +10,7 @@ use futures::SinkExt;
 use rocksdb::{WriteBatch, WriteOptions, DB};
 
 use hex;
+
 use std::collections::HashMap;
 use std::error::Error;
 use std::io;
@@ -85,7 +86,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         pin_mut!(headers_sink);
         let db = db.clone();
         let cache = cache.clone();
-        let (sync_future, utxo_stream, utxo_sink) = sync_utxo_with(
+        let (sync_future, _, utxo_stream, utxo_sink) = sync_utxo_with(
             db.clone(),
             cache.clone(),
             UTXO_FORK_MAX_DEPTH,

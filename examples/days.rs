@@ -5,6 +5,7 @@ extern crate bitcoin_utxo;
 use futures::pin_mut;
 use futures::stream;
 use futures::SinkExt;
+
 use tokio::time::Duration;
 
 use rocksdb::DB;
@@ -79,7 +80,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let (headers_future, headers_stream, headers_sink) = sync_headers(db.clone()).await;
     pin_mut!(headers_sink);
-    let (sync_future, utxo_stream, utxo_sink) = sync_utxo(
+    let (sync_future, _, utxo_stream, utxo_sink) = sync_utxo(
         db.clone(),
         cache,
         UTXO_FORK_MAX_DEPTH,
