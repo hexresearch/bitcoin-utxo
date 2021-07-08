@@ -134,7 +134,7 @@ where
                 let utxo_h = utxo_height(&db).max(last_sync_height);
                 let chain_h = get_chain_height(&db);
                 {   // Lock 'syncing' semaphore, so that other threads know not to access utxo cache
-                    sync_mutex.lock().await;
+                    let _guard = sync_mutex.lock().await;
                     println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
                     if chain_h > utxo_h {
                         let current_utxo_h = Arc::new(AtomicU32::new(utxo_h));
