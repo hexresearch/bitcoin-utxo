@@ -107,7 +107,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             hex::encode(&filter.content)
                         );
                     }
-                    store_filter(db, &hash, filter).map_err(|e| UtxoSyncError::UserWith(Box::new(e)))
+                    store_filter(db, &hash, filter)
+                        .map_err(|e| UtxoSyncError::UserWith(Box::new(e)))
                 }
             },
         )
@@ -189,7 +190,8 @@ async fn generate_filter(
         hashmap
             .get(out)
             .map_or(Err(bip158::Error::UtxoMissing(*out)), |s| Ok(s.clone()))
-    }).map_err(|e| UtxoSyncError::UserWith(Box::new(e)))
+    })
+    .map_err(|e| UtxoSyncError::UserWith(Box::new(e)))
 }
 
 fn store_filter(db: Arc<DB>, hash: &BlockHash, filter: BlockFilter) -> Result<(), rocksdb::Error> {

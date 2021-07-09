@@ -47,7 +47,7 @@ pub async fn connect(
             }
             NetworkMessage::Verack => {
                 println!("Received verack message: {:?}", msg);
-            },
+            }
             NetworkMessage::Ping(u) => {
                 sender.send(NetworkMessage::Pong(u)).await.unwrap();
             }

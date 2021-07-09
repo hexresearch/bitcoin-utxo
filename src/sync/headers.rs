@@ -1,9 +1,9 @@
-use bitcoin::BlockHash;
 use bitcoin::consensus::encode;
-use bitcoin::network::message_blockdata;
-use bitcoin::network::message_blockdata::Inventory;
 use bitcoin::network::message;
 use bitcoin::network::message::NetworkMessage;
+use bitcoin::network::message_blockdata;
+use bitcoin::network::message_blockdata::Inventory;
+use bitcoin::BlockHash;
 use futures::future::Future;
 use futures::sink::Sink;
 use futures::stream;

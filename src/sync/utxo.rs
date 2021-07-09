@@ -5,27 +5,27 @@ use bitcoin::network::message::NetworkMessage;
 use bitcoin::network::message_blockdata::Inventory;
 use bitcoin::{Block, BlockHash};
 use chrono::Utc;
-use futures::Future;
 use futures::sink;
 use futures::sink::Sink;
 use futures::stream;
-use futures::stream::{Stream, TryStreamExt, StreamExt};
+use futures::stream::{Stream, StreamExt, TryStreamExt};
+use futures::Future;
 use rocksdb::DB;
 use std::marker::Send;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use thiserror::Error;
+use tokio::sync::Mutex;
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use crate::{cache::utxo::*, utxo::UtxoKey};
 use crate::storage::chain::*;
 use crate::storage::utxo::utxo_height;
 use crate::utxo::UtxoState;
+use crate::{cache::utxo::*, utxo::UtxoKey};
 
 use std::fmt::{Debug, Display};
 
@@ -133,7 +133,8 @@ where
             loop {
                 let utxo_h = utxo_height(&db).max(last_sync_height);
                 let chain_h = get_chain_height(&db);
-                {   // Lock 'syncing' semaphore, so that other threads know not to access utxo cache
+                {
+                    // Lock 'syncing' semaphore, so that other threads know not to access utxo cache
                     let _guard = sync_mutex.lock().await;
                     println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
                     if chain_h > utxo_h {
@@ -141,7 +142,8 @@ where
                         while chain_h > current_utxo_h.load(Ordering::Relaxed) {
                             let start_h = current_utxo_h.load(Ordering::Relaxed) + 1;
                             let end_h = start_h + block_batch as u32;
-                            stream::iter(start_h .. end_h + 1).map(Ok)
+                            stream::iter(start_h..end_h + 1)
+                                .map(Ok)
                                 .try_for_each_concurrent(block_batch, |h| {
                                     let db = db.clone();
                                     let cache = cache.clone();
@@ -171,7 +173,8 @@ where
                                         .unwrap()?;
                                         Ok::<(), UtxoSyncError>(())
                                     }
-                                }).await?;
+                                })
+                                .await?;
                             finish_block(
                                 db.clone(),
                                 cache.clone(),
@@ -211,7 +214,7 @@ async fn sync_block<T, F, U>(
     broad_sender: &broadcast::Sender<NetworkMessage>,
     msg_sender: &mpsc::UnboundedSender<NetworkMessage>,
 ) -> Result<(), UtxoSyncError>
-  where
+where
     T: UtxoState + Decodable + Encodable + Clone + Debug,
     F: FnMut(u32, &Block) -> U,
     U: Future<Output = Result<(), UtxoSyncError>>,
@@ -240,7 +243,10 @@ async fn request_block(
     msg_sender: &mpsc::UnboundedSender<NetworkMessage>,
 ) -> Result<Block, UtxoSyncError> {
     let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
-    msg_sender.send(block_msg).map_err(|e| { println!("Error when requesting block at height {:?}: {:?}", h, e); UtxoSyncError::BlockReq(h, *hash)})?;
+    msg_sender.send(block_msg).map_err(|e| {
+        println!("Error when requesting block at height {:?}: {:?}", h, e);
+        UtxoSyncError::BlockReq(h, *hash)
+    })?;
     let mut receiver = broad_sender.subscribe();
     let mut block = None;
     while block == None {
@@ -279,7 +285,7 @@ async fn wait_handshake(broad_sender: &broadcast::Sender<NetworkMessage>) {
         let msg = receiver.recv().await.unwrap();
 
         if let NetworkMessage::Verack = msg {
-            break
+            break;
         }
     }
 }
