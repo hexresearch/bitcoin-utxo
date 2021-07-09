@@ -1,21 +1,21 @@
+use crate::storage::utxo::*;
+use crate::utxo::{UtxoKey, UtxoState};
+use crate::{storage::scheme::utxo_famiy, sync::utxo::UtxoSyncError};
 use bitcoin::blockdata::block::BlockHeader;
 use bitcoin::blockdata::transaction::{OutPoint, Transaction};
 use bitcoin::consensus::encode::{Decodable, Encodable};
-use dashmap::DashMap;
 use dashmap::iter::Iter;
-use dashmap::mapref::one::Ref;
 use dashmap::mapref::multiple::RefMulti;
+use dashmap::mapref::one::Ref;
+use dashmap::DashMap;
+use rayon::prelude::*;
 use rocksdb::{WriteBatch, DB};
 use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use tokio::time::{sleep, Duration};
-use rayon::prelude::*;
-use time::Instant;
 use std::ops::Div;
-use crate::{storage::scheme::utxo_famiy, sync::utxo::UtxoSyncError};
-use crate::storage::utxo::*;
-use crate::utxo::{UtxoKey, UtxoState};
+use std::sync::{Arc, Mutex};
+use time::Instant;
+use tokio::time::{sleep, Duration};
 
 /// Maximum fork depth after which we can flush UTXO to disk
 pub const UTXO_FORK_MAX_DEPTH: u32 = 100;
@@ -143,9 +143,18 @@ pub async fn finish_block<T: 'static + Encodable + Clone + Send + Sync>(
     let coins = cache.len();
     if force && end_h > fork_height {
         println!("Writing UTXO to disk...");
-        flush_utxo(db, cache, end_h - flush_period / 2, end_h - fork_height, coins > max_coins).await;
+        flush_utxo(
+            db,
+            cache,
+            end_h - flush_period / 2,
+            end_h - fork_height,
+            coins > max_coins,
+        )
+        .await;
         println!("Writing UTXO to disk is done");
-    } else if end_h > fork_height && ((start_h.div(flush_period) != end_h.div(flush_period)) || coins > max_coins) {
+    } else if end_h > fork_height
+        && ((start_h.div(flush_period) != end_h.div(flush_period)) || coins > max_coins)
+    {
         println!("UTXO cache size is {:?} coins", coins);
         println!("Writing UTXO to disk...");
         flush_utxo(
@@ -154,7 +163,8 @@ pub async fn finish_block<T: 'static + Encodable + Clone + Send + Sync>(
             end_h - flush_period / 2,
             end_h - fork_height,
             coins > max_coins,
-        ).await;
+        )
+        .await;
         println!("Writing UTXO to disk is done");
     }
 }
@@ -167,7 +177,7 @@ pub async fn flush_utxo<T: 'static + Encodable + Clone + Send + Sync>(
     h: u32,
     flush_pure: bool,
 ) {
-    let mut ks : HashMap<OutPoint, Option<CoinChange<T>>> = HashMap::new();
+    let mut ks: HashMap<OutPoint, Option<CoinChange<T>>> = HashMap::new();
     let batch = Arc::new(Mutex::new(WriteBatch::default()));
     let start = Instant::now();
     println!("Choose which coins to dump");
@@ -183,7 +193,7 @@ pub async fn flush_utxo<T: 'static + Encodable + Clone + Send + Sync>(
                 utxo_store_insert(&db, &mut batch, k, &t);
             }
             CoinChange::Remove(t, add_h, del_h)
-            if *add_h <= h && *del_h > h && *add_h != *del_h =>
+                if *add_h <= h && *del_h > h && *add_h != *del_h =>
             {
                 ks.insert(*k, Some(CoinChange::Remove(t.clone(), *add_h, *del_h)));
                 let mut batch = batch.lock().unwrap();
@@ -209,9 +219,15 @@ pub async fn flush_utxo<T: 'static + Encodable + Clone + Send + Sync>(
             cache.remove(k);
         }
     });
-    println!("Required {} seconds for cache traversal.", start.elapsed().as_seconds_f32());
+    println!(
+        "Required {} seconds for cache traversal.",
+        start.elapsed().as_seconds_f32()
+    );
 
-    let mut batch = Arc::try_unwrap(batch).unwrap_or_else(|_| panic!("Impossible!")).into_inner().unwrap();
+    let mut batch = Arc::try_unwrap(batch)
+        .unwrap_or_else(|_| panic!("Impossible!"))
+        .into_inner()
+        .unwrap();
     set_utxo_height(&mut batch, utxo_famiy(&db), h);
     println!("Writing to disk");
     db.write(batch).unwrap();
@@ -257,7 +273,7 @@ pub async fn wait_utxo<T: Decodable + Clone>(
                 value = get_utxo(&db, &cache, k, h);
                 counter += 1;
                 if counter > 1000 {
-                    return Err(UtxoSyncError::CoinWaitTimeout(h, *k))
+                    return Err(UtxoSyncError::CoinWaitTimeout(h, *k));
                 }
             }
             Some(v) => return Ok(v.value().payload().clone()),
@@ -269,12 +285,13 @@ pub async fn wait_utxo<T: Decodable + Clone>(
 /// Does not ask for the height at which the coin was encountered
 /// Nor does it modify the cache
 /// Used to build mempool filters
-pub fn get_utxo_noh<'a, T:Decodable + Clone>(
+pub fn get_utxo_noh<'a, T: Decodable + Clone>(
     db: &DB,
     cache: &'a UtxoCache<T>,
     k: &UtxoKey,
-) -> Option<T>{
-    cache.get(k)
+) -> Option<T> {
+    cache
+        .get(k)
         .map(|cc| cc.payload().clone())
         .or_else(|| utxo_store_read(db, k))
 }
@@ -299,7 +316,7 @@ pub async fn wait_utxo_noh<T: Decodable + Clone>(
                 value = get_utxo_noh(&db, &cache, k);
                 counter += 1;
                 if counter > 1000 {
-                    return Err(UtxoSyncError::CoinWaitTimeout(0, *k))
+                    return Err(UtxoSyncError::CoinWaitTimeout(0, *k));
                 }
             }
             Some(v) => return Ok(v),

@@ -5,26 +5,27 @@ use bitcoin::network::message::NetworkMessage;
 use bitcoin::network::message_blockdata::Inventory;
 use bitcoin::{Block, BlockHash};
 use chrono::Utc;
-use futures::Future;
 use futures::sink;
 use futures::sink::Sink;
 use futures::stream;
-use futures::stream::{Stream, TryStreamExt, StreamExt};
+use futures::stream::{Stream, StreamExt, TryStreamExt};
+use futures::Future;
 use rocksdb::DB;
 use std::marker::Send;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use thiserror::Error;
+use tokio::sync::Mutex;
 
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use crate::{cache::utxo::*, utxo::UtxoKey};
 use crate::storage::chain::*;
 use crate::storage::utxo::utxo_height;
 use crate::utxo::UtxoState;
+use crate::{cache::utxo::*, utxo::UtxoKey};
 
 use std::fmt::{Debug, Display};
 
@@ -80,6 +81,7 @@ pub async fn sync_utxo<T>(
     block_batch: usize,
 ) -> (
     impl Future<Output = Result<(), UtxoSyncError>>,
+    Arc<Mutex<()>>,
     impl Stream<Item = NetworkMessage> + Unpin,
     impl Sink<NetworkMessage, Error = encode::Error>,
 )
@@ -108,6 +110,7 @@ pub async fn sync_utxo_with<T, F, U>(
     with: F,
 ) -> (
     impl Future<Output = Result<(), UtxoSyncError>>,
+    Arc<Mutex<()>>,
     impl Stream<Item = NetworkMessage> + Unpin,
     impl Sink<NetworkMessage, Error = encode::Error>,
 )
@@ -119,8 +122,10 @@ where
     const BUFFER_SIZE: usize = 100;
     let (broad_sender, _) = broadcast::channel(BUFFER_SIZE);
     let (msg_sender, msg_reciver) = mpsc::unbounded_channel::<NetworkMessage>();
+    let sync_mutex = Arc::new(Mutex::new(()));
     let sync_future = {
         let broad_sender = broad_sender.clone();
+        let sync_mutex = sync_mutex.clone();
         async move {
             println!("Waiting handshake with node");
             wait_handshake(&broad_sender).await;
@@ -128,59 +133,65 @@ where
             loop {
                 let utxo_h = utxo_height(&db).max(last_sync_height);
                 let chain_h = get_chain_height(&db);
-                println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
-                if chain_h > utxo_h {
-                    let current_utxo_h = Arc::new(AtomicU32::new(utxo_h));
-                    while chain_h > current_utxo_h.load(Ordering::Relaxed) {
-                        let start_h = current_utxo_h.load(Ordering::Relaxed) + 1;
-                        let end_h = start_h + block_batch as u32;
-                        stream::iter(start_h .. end_h + 1).map(Ok)
-                            .try_for_each_concurrent(block_batch, |h| {
-                                let db = db.clone();
-                                let cache = cache.clone();
-                                let broad_sender = broad_sender.clone();
-                                let msg_sender = msg_sender.clone();
-                                let with = with.clone();
-                                async move {
-                                    tokio::spawn({
-                                        let cache = cache.clone();
-                                        async move {
-                                            if h <= chain_h {
-                                                sync_block(
-                                                    db.clone(),
-                                                    cache.clone(),
-                                                    h,
-                                                    chain_h,
-                                                    with,
-                                                    &broad_sender,
-                                                    &msg_sender,
-                                                )
-                                                .await?;
+                {
+                    // Lock 'syncing' semaphore, so that other threads know not to access utxo cache
+                    let _guard = sync_mutex.lock().await;
+                    println!("UTXO height {:?}, chain height {:?}", utxo_h, chain_h);
+                    if chain_h > utxo_h {
+                        let current_utxo_h = Arc::new(AtomicU32::new(utxo_h));
+                        while chain_h > current_utxo_h.load(Ordering::Relaxed) {
+                            let start_h = current_utxo_h.load(Ordering::Relaxed) + 1;
+                            let end_h = start_h + block_batch as u32;
+                            stream::iter(start_h..end_h + 1)
+                                .map(Ok)
+                                .try_for_each_concurrent(block_batch, |h| {
+                                    let db = db.clone();
+                                    let cache = cache.clone();
+                                    let broad_sender = broad_sender.clone();
+                                    let msg_sender = msg_sender.clone();
+                                    let with = with.clone();
+                                    async move {
+                                        tokio::spawn({
+                                            let cache = cache.clone();
+                                            async move {
+                                                if h <= chain_h {
+                                                    sync_block(
+                                                        db.clone(),
+                                                        cache.clone(),
+                                                        h,
+                                                        chain_h,
+                                                        with,
+                                                        &broad_sender,
+                                                        &msg_sender,
+                                                    )
+                                                    .await?;
+                                                }
+                                                Ok::<(), UtxoSyncError>(())
                                             }
-                                            Ok::<(), UtxoSyncError>(())
-                                        }
-                                    })
-                                    .await
-                                    .unwrap()?;
-                                    Ok::<(), UtxoSyncError>(())
-                                }
-                            }).await?;
-                        finish_block(
-                            db.clone(),
-                            cache.clone(),
-                            fork_height,
-                            max_coins,
-                            flush_period,
-                            start_h,
-                            end_h,
-                            false,
-                        )
-                        .await;
-                        current_utxo_h.store(end_h, Ordering::SeqCst);
+                                        })
+                                        .await
+                                        .unwrap()?;
+                                        Ok::<(), UtxoSyncError>(())
+                                    }
+                                })
+                                .await?;
+                            finish_block(
+                                db.clone(),
+                                cache.clone(),
+                                fork_height,
+                                max_coins,
+                                flush_period,
+                                start_h,
+                                end_h,
+                                false,
+                            )
+                            .await;
+                            current_utxo_h.store(end_h, Ordering::SeqCst);
+                        }
+                        println!("UTXO sync finished");
+                        last_sync_height = chain_h;
                     }
-                    println!("UTXO sync finished");
-                    last_sync_height = chain_h;
-                }
+                } // sync_mutex unlocked here
                 println!("Waiting new height after {}", chain_h);
                 chain_height_changes(&db, chain_h, Duration::from_secs(10)).await;
             }
@@ -191,7 +202,7 @@ where
         broad_sender.send(msg).unwrap_or(0);
         Ok::<_, encode::Error>(broad_sender)
     });
-    (sync_future, msg_stream, msg_sink)
+    (sync_future, sync_mutex, msg_stream, msg_sink)
 }
 
 async fn sync_block<T, F, U>(
@@ -203,7 +214,7 @@ async fn sync_block<T, F, U>(
     broad_sender: &broadcast::Sender<NetworkMessage>,
     msg_sender: &mpsc::UnboundedSender<NetworkMessage>,
 ) -> Result<(), UtxoSyncError>
-  where
+where
     T: UtxoState + Decodable + Encodable + Clone + Debug,
     F: FnMut(u32, &Block) -> U,
     U: Future<Output = Result<(), UtxoSyncError>>,
@@ -232,7 +243,10 @@ async fn request_block(
     msg_sender: &mpsc::UnboundedSender<NetworkMessage>,
 ) -> Result<Block, UtxoSyncError> {
     let block_msg = message::NetworkMessage::GetData(vec![Inventory::Block(*hash)]);
-    msg_sender.send(block_msg).map_err(|e| { println!("Error when requesting block at height {:?}: {:?}", h, e); UtxoSyncError::BlockReq(h, *hash)})?;
+    msg_sender.send(block_msg).map_err(|e| {
+        println!("Error when requesting block at height {:?}: {:?}", h, e);
+        UtxoSyncError::BlockReq(h, *hash)
+    })?;
     let mut receiver = broad_sender.subscribe();
     let mut block = None;
     while block == None {
@@ -271,7 +285,7 @@ async fn wait_handshake(broad_sender: &broadcast::Sender<NetworkMessage>) {
         let msg = receiver.recv().await.unwrap();
 
         if let NetworkMessage::Verack = msg {
-            break
+            break;
         }
     }
 }
