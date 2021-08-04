@@ -67,8 +67,10 @@ pub fn overwite_chain_height(db: &DB, h: u32) {
 pub async fn chain_height_changes(db: &DB, last_h: u32, dur: Duration) {
     let mut curh = last_h;
     while curh == last_h {
+        println!("Chain height changes sleep");
         sleep(dur).await;
         curh = chain_height(db, chain_famiy(db));
+        println!("Chain height changes, current {} started with {}", curh, last_h);
     }
 }
 
