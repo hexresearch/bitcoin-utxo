@@ -13,8 +13,9 @@ use rocksdb::{WriteBatch, DB};
 use std::collections::hash_map::RandomState;
 use std::collections::HashMap;
 use std::ops::Div;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use time::Instant;
+use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
 /// Maximum fork depth after which we can flush UTXO to disk
@@ -189,19 +190,19 @@ pub async fn flush_utxo<T: 'static + Encodable + Clone + Send + Sync>(
                 if *add_h >= oldest_pure {
                     ks.insert(*k, Some(CoinChange::Pure(t.clone(), *add_h)));
                 }
-                let mut batch = batch.lock().unwrap();
+                let mut batch = batch.lock().await;
                 utxo_store_insert(&db, &mut batch, k, &t);
             }
             CoinChange::Remove(t, add_h, del_h)
                 if *add_h <= h && *del_h > h && *add_h != *del_h =>
             {
                 ks.insert(*k, Some(CoinChange::Remove(t.clone(), *add_h, *del_h)));
-                let mut batch = batch.lock().unwrap();
+                let mut batch = batch.lock().await;
                 utxo_store_insert(&db, &mut batch, &k, &t);
             }
             CoinChange::Remove(_, _, del_h) if *del_h <= h => {
                 ks.insert(*k, None);
-                let mut batch = batch.lock().unwrap();
+                let mut batch = batch.lock().await;
                 utxo_store_delete(&db, &mut batch, &k);
             }
             CoinChange::Pure(_, touch_h) if flush_pure && *touch_h < oldest_pure => {
@@ -226,8 +227,7 @@ pub async fn flush_utxo<T: 'static + Encodable + Clone + Send + Sync>(
 
     let mut batch = Arc::try_unwrap(batch)
         .unwrap_or_else(|_| panic!("Impossible!"))
-        .into_inner()
-        .unwrap();
+        .into_inner();
     set_utxo_height(&mut batch, utxo_famiy(&db), h);
     println!("Writing to disk");
     db.write(batch).unwrap();
