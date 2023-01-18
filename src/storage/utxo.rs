@@ -1,6 +1,8 @@
 use bitcoin::consensus::encode::{deserialize, serialize, Decodable, Encodable};
 use byteorder::{BigEndian, ByteOrder};
+use log::*;
 use rocksdb::{ColumnFamily, DBIterator, IteratorMode, WriteBatch, DB};
+use std::any::type_name;
 use std::marker::PhantomData;
 
 use crate::storage::scheme::utxo_famiy;
@@ -24,9 +26,19 @@ pub fn utxo_store_delete(db: &DB, batch: &mut WriteBatch, k: &UtxoKey) {
 pub fn utxo_store_read<T: Decodable>(db: &DB, k: &UtxoKey) -> Option<T> {
     let cf = utxo_famiy(db);
     let kb = encode_utxo_key(k);
-    db.get_cf(cf, kb)
-        .unwrap()
-        .map(|bs| deserialize(&bs[..]).unwrap())
+    db.get_cf(cf, kb).unwrap().map(|bs| {
+        deserialize(&bs[..])
+            .map_err(|e| {
+                error!(
+                    "Failed to decode UTXO value for type {}, reason: {}, payload: {:?}",
+                    type_name::<T>(),
+                    e,
+                    bs
+                );
+                e
+            })
+            .unwrap()
+    })
 }
 
 /// Construct value for height
@@ -48,6 +60,20 @@ pub fn utxo_height(db: &DB) -> u32 {
 pub fn set_utxo_height(batch: &mut WriteBatch, cf: &ColumnFamily, h: u32) {
     let val = height_value(h);
     batch.put_cf(cf, b"height", &val);
+}
+
+/// Get height of synced utxo in memory, typically is greater that utxo_height
+pub fn sync_height(db: &DB) -> u32 {
+    let cf = utxo_famiy(db);
+    db.get_cf(cf, b"sync_height")
+        .unwrap()
+        .map_or(0, |bs| BigEndian::read_u32(&bs))
+}
+
+/// Put update of synced utxo in memory, typically is greater that utxo_height
+pub fn set_sync_height(batch: &mut WriteBatch, cf: &ColumnFamily, h: u32) {
+    let val = height_value(h);
+    batch.put_cf(cf, b"sync_height", &val);
 }
 
 pub struct UtxoIterator<'a, T>(DBIterator<'a>, PhantomData<T>);

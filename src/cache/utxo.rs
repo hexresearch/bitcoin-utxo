@@ -191,14 +191,14 @@ pub async fn flush_utxo<T: 'static + Encodable + Clone + Send + Sync>(
                     ks.insert(*k, Some(CoinChange::Pure(t.clone(), *add_h)));
                 }
                 let mut batch = batch.lock().await;
-                utxo_store_insert(&db, &mut batch, k, &t);
+                utxo_store_insert(&db, &mut batch, k, &(t, add_h));
             }
             CoinChange::Remove(t, add_h, del_h)
                 if *add_h <= h && *del_h > h && *add_h != *del_h =>
             {
                 ks.insert(*k, Some(CoinChange::Remove(t.clone(), *add_h, *del_h)));
                 let mut batch = batch.lock().await;
-                utxo_store_insert(&db, &mut batch, &k, &t);
+                utxo_store_insert(&db, &mut batch, &k, &(t, add_h));
             }
             CoinChange::Remove(_, _, del_h) if *del_h <= h => {
                 ks.insert(*k, None);

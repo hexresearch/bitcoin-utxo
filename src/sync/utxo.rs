@@ -10,6 +10,8 @@ use futures::sink::Sink;
 use futures::stream;
 use futures::stream::{Stream, StreamExt, TryStreamExt};
 use futures::Future;
+use log::*;
+use rocksdb::WriteBatch;
 use rocksdb::DB;
 use std::marker::Send;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -23,7 +25,8 @@ use tokio::time::{sleep, Duration};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::storage::chain::*;
-use crate::storage::utxo::utxo_height;
+use crate::storage::scheme::utxo_famiy;
+use crate::storage::utxo::{set_sync_height, sync_height, utxo_height};
 use crate::utxo::UtxoState;
 use crate::{cache::utxo::*, utxo::UtxoKey};
 
@@ -49,8 +52,9 @@ pub enum UtxoSyncError {
 /// Future blocks until utxo height == chain height
 pub async fn wait_utxo_sync(db: Arc<DB>, dur: Duration) {
     loop {
-        let utxo_h = utxo_height(&db);
+        let utxo_h = sync_height(&db);
         let chain_h = get_chain_height(&db);
+        trace!("Utxo height {utxo_h}, chain height {chain_h}");
         if utxo_h == chain_h {
             break;
         } else {
@@ -61,9 +65,9 @@ pub async fn wait_utxo_sync(db: Arc<DB>, dur: Duration) {
 
 /// Future that blocks until current height of utxo is changed
 pub async fn wait_utxo_height_changes(db: Arc<DB>, dur: Duration) {
-    let start_h = utxo_height(&db);
+    let start_h = sync_height(&db);
     loop {
-        let cur_h = utxo_height(&db);
+        let cur_h = sync_height(&db);
         if cur_h == start_h {
             sleep(dur).await;
         } else {
@@ -190,6 +194,9 @@ where
                         }
                         println!("UTXO sync finished");
                         last_sync_height = chain_h;
+                        let mut batch = WriteBatch::default();
+                        set_sync_height(&mut batch, utxo_famiy(&db), last_sync_height);
+                        db.write(batch).unwrap();
                     }
                 } // sync_mutex unlocked here
                 println!("Waiting new height after {}", chain_h);
